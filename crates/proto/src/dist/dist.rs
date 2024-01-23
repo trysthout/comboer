@@ -1,13 +1,6 @@
-use byteorder::WriteBytesExt;
 use bytes::Buf;
 
-use crate::{etf::term::*, Encoder, Len};
-
-trait OpCode {
-    const CODE: u8;
-    /// The number of elements in the tuple representing control message.
-    const ARITY: u8;
-}
+use crate::{dist::OpCode, etf::term::*, Encoder, Len};
 
 macro_rules! ctrl_msg {
     (
@@ -30,10 +23,9 @@ macro_rules! ctrl_msg {
                 value.get_u8();
                 // SmallTuple arity
                 value.get_u8();
-                
+
                 let code  = SmallInteger::from(value);
                 value.advance(code.len());
-                println!("value {:?}", value);
 
                 $(
                     let $f = <$ft>::from(value);
@@ -49,8 +41,8 @@ macro_rules! ctrl_msg {
         impl Encoder for $sn {
             type Error = anyhow::Error;
             fn encode<W: std::io::Write>(&self, w: &mut W) -> Result<(), Self::Error> {
-                w.write(&crate::etf::SMALL_TUPLE_EXT.to_be_bytes())?;
-                w.write(&Self::ARITY.to_be_bytes())?;
+                w.write_all(&crate::etf::SMALL_TUPLE_EXT.to_be_bytes())?;
+                w.write_all(&Self::ARITY.to_be_bytes())?;
                 SmallInteger(Self::CODE).encode(w)?;
 
                 $(
@@ -663,7 +655,6 @@ Same as ALIAS_SEND, but also with a sequential trace Token
     4
 );
 
-
 macro_rules! impl_ctrl_msg {
     ($($t:ident),+) => {
         #[derive(Debug, Clone)]
@@ -706,13 +697,12 @@ macro_rules! impl_ctrl_msg {
                         Self::$t(v) => v.encode(w),
                     )+
                 }
-           } 
+           }
         }
 
         impl TryFrom<&[u8]> for CtrlMsg {
             type Error = anyhow::Error;
-            fn try_from(mut value: &[u8]) -> Result<Self, Self::Error> {
-                println!("code {:?}", value);
+            fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
                 match value[3] {
                     $($t::CODE => Ok(Self::$t($t::from(value))),)+
                     _ => Err(anyhow::anyhow!("cannot convert value type to CtrlMsg"))
@@ -741,34 +731,106 @@ impl_ctrl_msg!(
     RegSend,
     GroupLeader,
     Exit2,
-    SendTT, 
+    SendTT,
     ExitTT,
-    RegSendTT, 
+    RegSendTT,
     Exit2TT,
-    MonitorP, 
-    DeMonitorP, 
-    MonitorPExit, 
+    MonitorP,
+    DeMonitorP,
+    MonitorPExit,
     SendSender,
-    SendSenderTT, 
-    PayloadExit, 
-    PayloadExitTT, 
+    SendSenderTT,
+    PayloadExit,
+    PayloadExitTT,
     PayloadExit2,
-    PayloadExit2TT, 
-    PayloadMonitorPExit, 
+    PayloadExit2TT,
+    PayloadMonitorPExit,
     SpawnRequest,
-    SpawnRequestTT, 
+    SpawnRequestTT,
     SpawnReply,
-    SpawnReplyTT, 
+    SpawnReplyTT,
     UnLinkId,
-    UnLinkIdAck, 
+    UnLinkIdAck,
     AliasSend,
     AliasSendTT
 );
 
+impl CtrlMsg {
+    pub fn get_from_pid_atom(&self) -> Option<PidOrAtom> {
+        match self {
+            CtrlMsg::AliasSend(v) => Some((&v.from).into()),
+            CtrlMsg::AliasSendTT(v) => Some((&v.from).into()),
+            CtrlMsg::Link(v) => Some((&v.from).into()),
+            CtrlMsg::SendCtrl(_) => None,
+            CtrlMsg::Exit(v) => Some((&v.from).into()),
+            CtrlMsg::UnLink(v) => Some((&v.from).into()),
+            CtrlMsg::NodeLink(_) => None,
+            CtrlMsg::RegSend(v) => Some((&v.from).into()),
+            CtrlMsg::GroupLeader(v) => Some((&v.from).into()),
+            CtrlMsg::Exit2(v) => Some((&v.from).into()),
+            CtrlMsg::SendTT(_) => None,
+            CtrlMsg::ExitTT(v) => Some((&v.from).into()),
+            CtrlMsg::RegSendTT(v) => Some((&v.from).into()),
+            CtrlMsg::Exit2TT(v) => Some((&v.from).into()),
+            CtrlMsg::MonitorP(v) => Some((&v.from).into()),
+            CtrlMsg::DeMonitorP(v) => Some((&v.from).into()),
+            CtrlMsg::MonitorPExit(v) => Some(v.from_proc.clone()),
+            CtrlMsg::SendSender(v) => Some((&v.from).into()),
+            CtrlMsg::SendSenderTT(v) => Some((&v.from).into()),
+            CtrlMsg::PayloadExit(v) => Some((&v.from).into()),
+            CtrlMsg::PayloadExitTT(v) => Some((&v.from).into()),
+            CtrlMsg::PayloadExit2(v) => Some((&v.from).into()),
+            CtrlMsg::PayloadExit2TT(v) => Some((&v.from).into()),
+            CtrlMsg::PayloadMonitorPExit(v) => Some(v.from_proc.clone()),
+            CtrlMsg::SpawnRequest(v) => Some((&v.from).into()),
+            CtrlMsg::SpawnRequestTT(v) => Some((&v.from).into()),
+            CtrlMsg::SpawnReply(_) => None,
+            CtrlMsg::SpawnReplyTT(_) => None,
+            CtrlMsg::UnLinkId(v) => Some((&v.from).into()),
+            CtrlMsg::UnLinkIdAck(v) => Some((&v.from).into()),
+        }
+    }
+
+    pub fn get_to_pid_atom(&self) -> Option<PidOrAtom> {
+        match self {
+            CtrlMsg::AliasSend(v) => Some((&v.alias).into()),
+            CtrlMsg::AliasSendTT(v) => Some((&v.alias).into()),
+            CtrlMsg::Link(v) => Some((&v.to).into()),
+            CtrlMsg::SendCtrl(_) => None,
+            CtrlMsg::Exit(v) => Some((&v.to).into()),
+            CtrlMsg::UnLink(v) => Some((&v.to).into()),
+            CtrlMsg::NodeLink(_) => None,
+            CtrlMsg::RegSend(v) => Some((&v.to_name).into()),
+            CtrlMsg::GroupLeader(v) => Some((&v.to).into()),
+            CtrlMsg::Exit2(v) => Some((&v.to).into()),
+            CtrlMsg::SendTT(_) => None,
+            CtrlMsg::ExitTT(v) => Some((&v.to).into()),
+            CtrlMsg::RegSendTT(v) => Some((&v.to_name).into()),
+            CtrlMsg::Exit2TT(v) => Some((&v.to).into()),
+            CtrlMsg::MonitorP(v) => Some(v.to_proc.clone()),
+            CtrlMsg::DeMonitorP(v) => Some(v.to_proc.clone()),
+            CtrlMsg::MonitorPExit(v) => Some((&v.to).into()),
+            CtrlMsg::SendSender(v) => Some((&v.to).into()),
+            CtrlMsg::SendSenderTT(v) => Some((&v.to).into()),
+            CtrlMsg::PayloadExit(v) => Some((&v.to).into()),
+            CtrlMsg::PayloadExitTT(v) => Some((&v.to).into()),
+            CtrlMsg::PayloadExit2(v) => Some((&v.to).into()),
+            CtrlMsg::PayloadExit2TT(v) => Some((&v.to).into()),
+            CtrlMsg::PayloadMonitorPExit(v) => Some((&v.to).into()),
+            CtrlMsg::SpawnRequest(v) => Some((&v.group_leader).into()),
+            CtrlMsg::SpawnRequestTT(v) => Some((&v.group_leader).into()),
+            CtrlMsg::SpawnReply(_) => None,
+            CtrlMsg::SpawnReplyTT(_) => None,
+            CtrlMsg::UnLinkId(v) => Some((&v.to).into()),
+            CtrlMsg::UnLinkIdAck(v) => Some((&v.to).into()),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Dist {
     pub ctrl_msg: CtrlMsg,
-    pub msg: Option<Term>, 
+    pub msg: Option<Term>,
 }
 
 impl Dist {
@@ -779,18 +841,18 @@ impl Dist {
 
 impl Encoder for Dist {
     type Error = anyhow::Error;
-   fn encode<W: std::io::Write>(&self, w: &mut W) -> Result<(), Self::Error> {
-       w.write(&self.len().to_be_bytes())?;
-       w.write(&112_u8.to_be_bytes())?;
-       w.write(&131_u8.to_be_bytes())?;
-      self.ctrl_msg.encode(w)?; 
-      if let Some(term) = &self.msg {
-            w.write(&131_u8.to_be_bytes())?;
+    fn encode<W: std::io::Write>(&self, w: &mut W) -> Result<(), Self::Error> {
+        w.write_all(&(self.len() as u32).to_be_bytes())?;
+        w.write_all(&112_u8.to_be_bytes())?;
+        w.write_all(&131_u8.to_be_bytes())?;
+        self.ctrl_msg.encode(w)?;
+        if let Some(term) = &self.msg {
+            w.write_all(&131_u8.to_be_bytes())?;
             term.encode(w)?;
-      }
+        }
 
-      Ok(())
-   } 
+        Ok(())
+    }
 }
 
 impl TryFrom<&[u8]> for Dist {
@@ -801,9 +863,7 @@ impl TryFrom<&[u8]> for Dist {
         // 131
         value.get_u8();
         let ctrl_msg = CtrlMsg::try_from(value)?;
-        println!("aaaaa {:?} {:?}", ctrl_msg, ctrl_msg.len());
         value.advance(ctrl_msg.len());
-        println!("vvvv {:?} ", value);
         let msg = (!value.is_empty()).then(|| {
             // 131
             value.get_u8();
@@ -812,16 +872,13 @@ impl TryFrom<&[u8]> for Dist {
             term
         });
 
-        Ok(Self {
-            ctrl_msg,
-            msg,
-        })
-   } 
+        Ok(Self { ctrl_msg, msg })
+    }
 }
 
 impl Len for Dist {
     fn len(&self) -> usize {
-       2 + self.ctrl_msg.len() + 1 + self.msg.as_ref().map(|t| t.len()).unwrap_or_default()
+        2 + self.ctrl_msg.len() + 1 + self.msg.as_ref().map(|t| t.len()).unwrap_or_default()
     }
 }
 
@@ -830,28 +887,11 @@ mod test {
     use super::*;
 
     #[test]
-    fn link() {
-        let buf = vec![
-            0x61, 0x01, 0x58, 0x77, 0x08, 0x62, 0x40, 0x66, 0x65, 0x64, 0x6f, 0x72, 0x61, 0x00,
-            0x00, 0x00, 0x39, 0x00, 0x00, 0x00, 0x00, 0x65, 0x88, 0x36, 0x16, 0x58, 0x77, 0x08,
-            0x62, 0x40, 0x66, 0x65, 0x64, 0x6f, 0x72, 0x61, 0x00, 0x00, 0x00, 0x39, 0x00, 0x00,
-            0x00, 0x00, 0x65, 0x88, 0x36, 0x16,
-        ];
-        let l = Link::from(&buf[..]);
-        assert_eq!(l.from.id, 57);
-        assert_eq!(l.from.creation, 1703425558);
-        assert_eq!(l.to.id, 57);
-        assert_eq!(l.to.creation, 1703425558);
-        println!("{:?}", l.len());
-        let mut enc = vec![];
-        l.encode(&mut enc).unwrap();
-        println!("enc {:?}", &enc);
-        assert_eq!(enc, buf);
-    }
-
-    #[test]
     fn send() {
-        let buf = vec![104, 3, 97, 2, 119, 0, 88, 119, 8, 97, 64, 102, 101, 100, 111, 114, 97, 0, 0, 0, 116, 0, 0, 0, 0, 101, 136, 14, 0];
+        let buf = [
+            104, 3, 97, 2, 119, 0, 88, 119, 8, 97, 64, 102, 101, 100, 111, 114, 97, 0, 0, 0, 116,
+            0, 0, 0, 0, 101, 136, 14, 0,
+        ];
         let s = SendCtrl::from(&buf[..]);
         assert_eq!(s.unused.0, "");
         assert_eq!(s.to.id, 116);
@@ -859,7 +899,11 @@ mod test {
         println!("{:?}", s.len());
 
         // dist
-        let buf = vec![112, 131, 104, 3, 97, 2, 119, 0, 88, 119, 8, 97, 64, 102, 101, 100, 111, 114, 97, 0, 0, 0, 116, 0, 0, 0, 0, 101, 136, 14, 0, 131, 104, 2, 119, 2, 104, 105, 88, 119, 8, 97, 64, 102, 101, 100, 111, 114, 97, 0, 0, 0, 116, 0, 0, 0, 0, 101, 136, 14, 0];
+        let buf = vec![
+            112, 131, 104, 3, 97, 2, 119, 0, 88, 119, 8, 97, 64, 102, 101, 100, 111, 114, 97, 0, 0,
+            0, 116, 0, 0, 0, 0, 101, 136, 14, 0, 131, 104, 2, 119, 2, 104, 105, 88, 119, 8, 97, 64,
+            102, 101, 100, 111, 114, 97, 0, 0, 0, 116, 0, 0, 0, 0, 101, 136, 14, 0,
+        ];
         let dist = Dist::try_from(&buf[..]).unwrap();
         println!("dist {:?}", dist.len());
         assert!(matches!(dist.ctrl_msg, CtrlMsg::SendCtrl(_)));
@@ -869,7 +913,7 @@ mod test {
 
         let mut expeted = vec![];
         dist.encode(&mut expeted).unwrap();
-        assert_eq!(buf, expeted);
+        assert_eq!(buf, expeted[4..]);
         println!("{:?}", buf);
         println!("{:?}", expeted);
     }

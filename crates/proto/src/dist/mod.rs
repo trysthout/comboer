@@ -91,8 +91,21 @@ impl Default for DistFlags {
     }
 }
 
+trait OpCode {
+    const CODE: u8;
+    /// The number of elements in the tuple representing control message.
+    const ARITY: u8;
+}
+
+pub trait ProcessKind {
+    fn get_from_pid_atom(&self) -> NewPid;
+    fn get_to_pid_atom(&self) -> NewPid;
+}
+
 pub mod dist;
 pub use dist::*;
 pub mod epmd;
 pub use epmd::*;
+
+use crate::etf::term::NewPid;
 pub mod handshake;

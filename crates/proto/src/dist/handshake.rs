@@ -1,21 +1,15 @@
-use std::{iter::repeat_with, time::SystemTime, io::Write};
+use std::time::SystemTime;
 
-use byteorder::{BigEndian, ByteOrder};
-use bytes::{Buf, BufMut, BytesMut};
+use bytes::{Buf, BufMut};
 use md5::{Digest, Md5};
 
 use crate::DistFlags;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum HandshakeVersion {
     V5,
+    #[default]
     V6,
-}
-
-impl Default for HandshakeVersion {
-    fn default() -> Self {
-        HandshakeVersion::V6
-    }
 }
 
 impl From<&HandshakeVersion> for u16 {
@@ -37,7 +31,7 @@ impl From<u16> for HandshakeVersion {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum Status {
     Ok,
     OkSimultaneous,
@@ -47,13 +41,8 @@ pub enum Status {
     // nodename, creation
     #[allow(dead_code)]
     Named(String, u32),
+    #[default]
     None,
-}
-
-impl Default for Status {
-    fn default() -> Self {
-        Status::None
-    }
 }
 
 impl From<&[u8]> for Status {
@@ -92,7 +81,10 @@ impl HandshakeCodec {
             local_node_name: node_name,
             remote_node_name: "".to_string(),
             cookie,
-            creation: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs() as u32,
+            creation: SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as u32,
             local_challenge: fastrand::u32(..),
             remote_challenge: fastrand::u32(..),
             ..Default::default()
@@ -117,8 +109,7 @@ impl HandshakeCodec {
         // version
         self.version = buf.get_u16().into();
         // flags
-        self.dflags =
-            DistFlags::from_bits(buf.get_u32() as u64).unwrap_or_else(|| DistFlags::default());
+        self.dflags = DistFlags::from_bits(buf.get_u32() as u64).unwrap_or_default();
         if self.dflags.contains(DistFlags::HANDSHAKE_23) {
             self.version = HandshakeVersion::V6;
         }
@@ -126,7 +117,7 @@ impl HandshakeCodec {
         self.remote_node_name = String::from_utf8_lossy(buf.chunk()).to_string();
     }
 
-    pub fn encode_v6_name(&self,  buf: &mut &mut [u8]) -> usize {
+    pub fn encode_v6_name(&self, buf: &mut &mut [u8]) -> usize {
         //let length = 1 + 8 + 4 + 2 + self.node_name.len();
         let length = 1 + 8 + 4 + 2 + self.local_node_name.len();
         let packet_length = self.encode_length(length, buf);
@@ -145,7 +136,7 @@ impl HandshakeCodec {
         buf.get_u8();
 
         // flags
-        self.dflags = DistFlags::from_bits(buf.get_u64()).unwrap_or_else(|| DistFlags::default());
+        self.dflags = DistFlags::from_bits(buf.get_u64()).unwrap_or_default();
         // creation
         self.creation = buf.get_u32();
         // nodename length
@@ -155,13 +146,11 @@ impl HandshakeCodec {
     }
 
     pub fn encode_status(&self, buf: &mut &mut [u8]) -> usize {
-        println!("status {:?}", buf);
         let packet_length = self.encode_length(3, buf);
-        //let packet_length = 5; 
+        //let packet_length = 5;
         //buf.put_u16(3);
         //buf[2..5].copy_from_slice(b"sok");
         buf.put_slice(b"sok");
-        println!("status {:?} {:?}", packet_length, &buf[0..packet_length]);
         packet_length
     }
 
@@ -188,8 +177,7 @@ impl HandshakeCodec {
         // version
         self.version = buf.get_u16().into();
         // flags
-        self.dflags =
-            DistFlags::from_bits(buf.get_u32() as u64).unwrap_or_else(|| DistFlags::default());
+        self.dflags = DistFlags::from_bits(buf.get_u32() as u64).unwrap_or_default();
         if self.dflags.contains(DistFlags::HANDSHAKE_23) {
             self.version = HandshakeVersion::V6;
         }
@@ -214,7 +202,7 @@ impl HandshakeCodec {
     pub fn decode_v6_challenge(&mut self, mut buf: &[u8]) {
         // 'N'
         buf.get_u8();
-        self.dflags = DistFlags::from_bits(buf.get_u64()).unwrap_or_else(|| DistFlags::default());
+        self.dflags = DistFlags::from_bits(buf.get_u64()).unwrap_or_default();
         self.remote_challenge = buf.get_u32();
         self.creation = buf.get_u32();
         // node_name length
@@ -235,8 +223,7 @@ impl HandshakeCodec {
     pub fn decode_complement(&mut self, mut buf: &[u8]) {
         // 'c'
         buf.get_u8();
-        self.dflags = DistFlags::from_bits((buf.get_u32() as u64) << 32)
-            .unwrap_or_else(|| DistFlags::default());
+        self.dflags = DistFlags::from_bits((buf.get_u32() as u64) << 32).unwrap_or_default();
         self.creation = buf.get_u32();
     }
 
@@ -276,8 +263,7 @@ impl HandshakeCodec {
         let digest = &buf[..16];
         buf.advance(16);
         let expected_digest = gen_digest(self.local_challenge, &self.cookie);
-        println!("{:?}", expected_digest);
-        println!("{:?}", digest.eq(&expected_digest));
+
         digest.eq(&expected_digest)
     }
 

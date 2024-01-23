@@ -1,57 +1,115 @@
-use proto::{etf::term, RegSend, CtrlMsg, SendCtrl};
-use server::{NodePrimitive, AsClient, AtomPattern, PatternMatch};
+use proto::etf::term::Term;
+use proto::{etf::term, RegSend, SendCtrl};
+use proto::{Dist, SendSender};
+use server::{NodeAsClient, NodePrimitive};
+use tokio::sync::mpsc;
 
+#[derive(Debug)]
+struct A {
+    shutdown_tx: mpsc::Sender<()>,
+}
 
-#[tokio::main]
-async fn main() -> Result<(), anyhow::Error> {
-    let mut node = NodePrimitive::new("rust@fedora".to_string(), "aaa".to_string());
-    let mut client = node.connect_local_by_name("127.0.0.1:4369", "b").await?;
+#[async_trait::async_trait]
+impl server::Handler for A {
+    type Error = anyhow::Error;
 
-    let from = term::NewPid { 
-            node: term::SmallAtomUtf8("rust@fedora".to_string()), 
-            id: 0, 
-            serial: 0, 
-            creation: fastrand::u32(..),
-    }; 
+    async fn reg_send(
+        self,
+        stream: &mut NodePrimitive,
+        _ctrl: RegSend,
+        msg: term::Term,
+    ) -> Result<Self, Self::Error> {
+        if let Ok(tuple) = term::SmallTuple::try_from(msg.clone()) {
+            if let Ok(p) = term::NewPid::try_from(&tuple.elems[1]) {
+                //let mut data = vec![];
+                let reg = SendCtrl {
+                    unused: term::SmallAtomUtf8("".to_string()),
+                    to: p,
+                };
 
-    let ctrl = RegSend { 
-        from: from.clone(), 
-        unused: term::SmallAtomUtf8("".to_string()), 
-        to_name: term::SmallAtomUtf8("ss".to_string()), 
-    }.into();
+                let msg = term::SmallAtomUtf8("ccccccccccccccccc".to_string());
+                let dist = Dist {
+                    ctrl_msg: reg.into(),
+                    msg: Some(msg.into()),
+                };
 
-    let msg = term::SmallTuple{
-        arity: 2,
-        elems: vec![
-            term::SmallAtomUtf8("call".to_string()).into(),
-            from.clone().into(),
-        ]
-    }.into();
+                //dist.encode(&mut data)?;
+                stream.send(dist).await;
 
-    let pattern = AtomPattern("hi".to_string());
-    let pattern_fn = |term: &term::Term| -> bool {
-       term::SmallAtomUtf8::try_from(term).map(|t| t.pattern_match(&pattern)).ok().unwrap_or_default() 
-    };
-    //res.send(ctrl, msg).await?;
-    let res = client.send_and_wait(ctrl, msg, pattern_fn).await?;
-    if let Some(dist) = res {
-        if let CtrlMsg::SendSender(ctrl) = dist.ctrl_msg {
-            let from = ctrl.from;
-            let ctrl = SendCtrl {
-                unused: term::SmallAtomUtf8("".to_string()),
-                to: from,
-            }.into();
-            let msg = term::SmallTuple {
+                //stream.write_all(&data).await?;
+            }
+        }
+
+        Ok(self)
+    }
+
+    async fn send_sender(
+        self,
+        stream: &mut NodePrimitive,
+        ctrl: SendSender,
+        _msg: term::Term,
+    ) -> Result<Self, Self::Error> {
+        let from = ctrl.from;
+        let ctrl = SendCtrl {
+            unused: term::SmallAtomUtf8("".to_string()),
+            to: from,
+        };
+        let dist = Dist {
+            ctrl_msg: ctrl.clone().into(),
+            msg: Some(
+                term::SmallTuple {
                     arity: 2,
                     elems: vec![
                         term::SmallAtomUtf8("from_rust".to_string()).into(),
                         term::SmallAtomUtf8("rust node".to_string()).into(),
                     ],
-                }.into();
+                }
+                .into(),
+            ),
+        };
 
-            client.send(ctrl, msg).await?;
-        }
+        stream.send(dist).await;
+        let _ = self.shutdown_tx.send(()).await;
+
+        Ok(self)
     }
+}
+
+#[tokio::main]
+async fn main() -> Result<(), anyhow::Error> {
+    let (shutdown_tx, mut shutdown_rx) = mpsc::channel(1);
+    let handler = A { shutdown_tx };
+    let node = NodeAsClient::new("rust@fedora".to_string(), "aaa".to_string());
+    let mut client = node
+        .connect_local_by_name("127.0.0.1:4369", "a", handler)
+        .await?;
+
+    let from = term::NewPid {
+        node: term::SmallAtomUtf8("rust@fedora".to_string()),
+        id: 0,
+        serial: 0,
+        creation: fastrand::u32(..),
+    };
+
+    let ctrl = RegSend {
+        from: from.clone(),
+        unused: term::SmallAtomUtf8("".to_string()),
+        to_name: term::SmallAtomUtf8("ss".to_string()),
+    }
+    .into();
+
+    let msg: Term = term::SmallTuple {
+        arity: 2,
+        elems: vec![
+            term::SmallAtomUtf8("call".to_string()).into(),
+            from.clone().into(),
+        ],
+    }
+    .into();
+
+    let _ = client.0.send(Dist::new(ctrl, Some(msg))).await;
+
+    let _ = shutdown_rx.recv().await;
 
     Ok(())
 }

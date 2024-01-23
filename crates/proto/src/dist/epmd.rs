@@ -4,7 +4,10 @@ use byteorder::{BigEndian, ByteOrder};
 use bytes::{Buf, BufMut};
 use dashmap::DashMap;
 use regex::bytes::Regex;
-use tokio::{net::{ToSocketAddrs, TcpListener, TcpStream}, io::{AsyncWriteExt, AsyncReadExt}};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::{TcpListener, TcpStream, ToSocketAddrs},
+};
 
 ///
 /// 1	2	    1	        1	        2	            2	            2	    Nlen	    2	    Elen
@@ -103,7 +106,7 @@ pub struct NodeInfo {
 
 #[derive(Debug)]
 pub struct EpmdClient {
-    stream: TcpStream
+    stream: TcpStream,
 }
 
 impl EpmdClient {
@@ -111,46 +114,40 @@ impl EpmdClient {
         let stream = TcpStream::connect(addr).await?;
         let _ = stream.set_nodelay(true);
 
-        Ok(Self {
-            stream,
-        })
-
+        Ok(Self { stream })
     }
 
     pub async fn req_names(&mut self) -> Result<GetAllRegisteredNamesResp, anyhow::Error> {
-        let _ = self.stream.write(&[0, 1, NAMES_REQ]).await?;
-        let mut buf = vec![0;512]; 
+        self.stream.write_all(&[0, 1, NAMES_REQ]).await?;
+        let mut buf = vec![0; 512];
         // epmd port
         self.stream.read_exact(&mut buf[..4]).await?;
         let epmd_port = BigEndian::read_u32(&buf[..4]);
         let mut nodes = Vec::with_capacity(10);
         let re = Regex::new(r"name (\S+) at port (\d+)\n")?;
 
-        loop { 
+        loop {
             let n = self.stream.read(&mut buf).await?;
             if n == 0 {
                 break;
             }
 
-            println!("{:?}", String::from_utf8_lossy(&buf[..n]));
             for (_, [name, port]) in re.captures_iter(&buf[..n]).map(|m| m.extract()) {
-                println!("{:?} {:?}", name, String::from_utf8_lossy(port));
-                nodes.push(
-                    NodeInfo {
-                        name: String::from_utf8_lossy(name).to_string(),
-                        port: String::from_utf8_lossy(port).parse::<u16>().unwrap(),
-                    }
-                );
+                nodes.push(NodeInfo {
+                    name: String::from_utf8_lossy(name).to_string(),
+                    port: String::from_utf8_lossy(port).parse::<u16>().unwrap(),
+                });
             }
         }
 
-        Ok(GetAllRegisteredNamesResp {
-            epmd_port,
-            nodes,
-        })
+        Ok(GetAllRegisteredNamesResp { epmd_port, nodes })
     }
 
-    pub async fn register_node(&mut self, port: u16, node_name: &str) -> Result<RegisterNodeXResp, anyhow::Error>{
+    pub async fn register_node(
+        &mut self,
+        port: u16,
+        node_name: &str,
+    ) -> Result<RegisterNodeXResp, anyhow::Error> {
         let length = 1 + 2 + 1 + 1 + 2 + 2 + 2 + node_name.len() + 2;
         let mut buf = Vec::with_capacity(2 + length);
         buf.put_u16(length as u16);
@@ -165,20 +162,15 @@ impl EpmdClient {
         buf.put_u16(0);
 
         // Send request
-        self.stream.write(&buf).await?;
+        self.stream.write_all(&buf).await?;
 
         // Wait resp
-        self.stream.read_exact(&mut buf[0..6]).await?; 
+        self.stream.read_exact(&mut buf[0..6]).await?;
         // result
         let result = buf[1];
         // creation
         let creation = BigEndian::read_u32(&buf[2..6]);
-        Ok(
-            RegisterNodeXResp {
-                result,
-                creation,
-            }
-        )
+        Ok(RegisterNodeXResp { result, creation })
     }
 }
 
@@ -199,15 +191,13 @@ impl EpmdServer {
         let me = &mut self.clone();
         loop {
             let (stream, _) = listener.accept().await?;
-            let mut me = me.clone(); 
-            tokio::spawn(async move {
-                me.handle_connection(stream).await
-            });
+            let mut me = me.clone();
+            tokio::spawn(async move { me.handle_connection(stream).await });
         }
     }
 
     async fn handle_connection(&mut self, mut stream: TcpStream) -> Result<(), anyhow::Error> {
-        let mut buf = vec![0;512];
+        let mut buf = vec![0; 512];
         loop {
             stream.read_exact(&mut buf[..2]).await?;
             let length = BigEndian::read_u16(&buf[..2]) as usize;
@@ -219,28 +209,28 @@ impl EpmdServer {
                 ALIVE2_REQ => {
                     self.decode_alive_req(&buf);
                     let n = self.encode_alive_x_resp(&mut buf[0..]);
-                    stream.write(&buf[..n]).await?;
+                    stream.write_all(&buf[..n]).await?;
                     return Ok(());
                 }
 
                 NAMES_REQ => {
                     let n = self.encode_names_resp(&mut buf[0..]);
-                    stream.write(&buf[..n]).await?;
+                    stream.write_all(&buf[..n]).await?;
                     return Ok(());
                 }
 
-               x => return Err(anyhow::anyhow!("Unsupported tag, got: {}", x))
+                x => return Err(anyhow::anyhow!("Unsupported tag, got: {}", x)),
             }
         }
     }
 
-    fn decode_alive_req(&mut self, mut buf: &[u8]){
+    fn decode_alive_req(&mut self, mut buf: &[u8]) {
         // 120
         buf.get_u8();
 
         let port_no = buf.get_u16();
 
-        let hidden = if buf.get_u8() == 72 { true } else { false };
+        let hidden = buf.get_u8() == 72;
 
         let protocol = buf.get_u8();
         let highest_version = buf.get_u16();
@@ -267,11 +257,15 @@ impl EpmdServer {
         self.nodes.insert(node_name, req);
     }
 
-
     fn encode_alive_x_resp(&self, mut buf: &mut [u8]) -> usize {
         buf.put_u8(ALIVE2_X_RESP);
         buf.put_u8(0);
-        buf.put_u32(SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs() as u32);
+        buf.put_u32(
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as u32,
+        );
 
         1 + 1 + 4
     }
@@ -297,7 +291,6 @@ impl EpmdServer {
     }
 }
 
-
 #[derive(Debug, Default)]
 pub struct EpmdCodec {
     nodes: Arc<DashMap<String, RegisterNodeReq>>,
@@ -319,12 +312,8 @@ impl EpmdCodec {
         let result = buf.get_u8();
         // creation
         let creation = buf.get_u32();
-        RegisterNodeXResp {
-            result,
-            creation,
-        }
+        RegisterNodeXResp { result, creation }
     }
-
 
     fn encode_alive_resp(&self, code: u8, buf: &mut bytes::BytesMut) {
         buf.put_u8(ALIVE2_X_RESP);

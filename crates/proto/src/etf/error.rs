@@ -1,6 +1,6 @@
-use std::fmt::{Display, self};
+use std::fmt::{self, Display};
 
-use serde::{ser, de};
+use serde::{de, ser};
 
 #[derive(Debug)]
 pub enum Error {

@@ -34,9 +34,6 @@ trait TermTag {
 //    Invalid,
 //}
 
-
-
-
 //impl Len for Term {
 //    fn len(&self) -> usize {
 //        println!("self {:?}", self);
@@ -79,9 +76,9 @@ impl TermTag for AtomUtf8 {
 impl Encoder for AtomUtf8 {
     type Error = anyhow::Error;
     fn encode<W: std::io::Write>(&self, w: &mut W) -> Result<(), Self::Error> {
-        w.write(&ATOM_UTF8_EXT.to_be_bytes())?;
-        w.write(&(self.0.len() as u16).to_be_bytes())?;
-        w.write(self.0.as_bytes())?;
+        w.write_all(&ATOM_UTF8_EXT.to_be_bytes())?;
+        w.write_all(&(self.0.len() as u16).to_be_bytes())?;
+        w.write_all(self.0.as_bytes())?;
         Ok(())
     }
 }
@@ -91,7 +88,7 @@ impl<'a> From<&'a [u8]> for AtomUtf8 {
         value.get_u8();
         let n = value.get_u16() as usize;
         let (node_bytes, _) = value.split_at(n);
-        let s = String::from_utf8_lossy(&node_bytes).to_string();
+        let s = String::from_utf8_lossy(node_bytes).to_string();
         AtomUtf8(s)
     }
 }
@@ -106,7 +103,7 @@ impl Len for AtomUtf8 {
 /// 1	 1	    Len
 /// 119  Len	AtomName
 ///
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SmallAtomUtf8(pub String);
 
 impl TermTag for SmallAtomUtf8 {
@@ -116,9 +113,9 @@ impl TermTag for SmallAtomUtf8 {
 impl Encoder for SmallAtomUtf8 {
     type Error = anyhow::Error;
     fn encode<W: std::io::Write>(&self, w: &mut W) -> Result<(), anyhow::Error> {
-        w.write(&SMALL_ATOM_UTF8_EXT.to_be_bytes())?;
-        w.write(&(self.0.len() as u8).to_be_bytes())?;
-        w.write(self.0.as_bytes())?;
+        w.write_all(&SMALL_ATOM_UTF8_EXT.to_be_bytes())?;
+        w.write_all(&(self.0.len() as u8).to_be_bytes())?;
+        w.write_all(self.0.as_bytes())?;
         Ok(())
     }
 }
@@ -128,7 +125,7 @@ impl<'a> From<&'a [u8]> for SmallAtomUtf8 {
         value.get_u8();
         let n = value.get_u8() as usize;
         let (node_bytes, _) = value.split_at(n);
-        let s = String::from_utf8_lossy(&node_bytes).to_string();
+        let s = String::from_utf8_lossy(node_bytes).to_string();
         value.advance(n);
         SmallAtomUtf8(s)
     }
@@ -159,11 +156,11 @@ impl TermTag for Pid {
 impl Encoder for Pid {
     type Error = anyhow::Error;
     fn encode<W: std::io::Write>(&self, w: &mut W) -> Result<(), anyhow::Error> {
-        w.write(&PID_EXT.to_be_bytes())?;
+        w.write_all(&PID_EXT.to_be_bytes())?;
         self.node.encode(w)?;
-        w.write(&self.id.to_be_bytes())?;
-        w.write(&self.serial.to_be_bytes())?;
-        w.write(&self.creation.to_be_bytes())?;
+        w.write_all(&self.id.to_be_bytes())?;
+        w.write_all(&self.serial.to_be_bytes())?;
+        w.write_all(&self.creation.to_be_bytes())?;
         Ok(())
     }
 }
@@ -196,7 +193,7 @@ impl Len for Pid {
 /// 1	N	    4	4	    4
 /// 88	Node	ID	Serial	Creation
 ///
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct NewPid {
     pub node: SmallAtomUtf8,
     pub id: u32,
@@ -211,11 +208,11 @@ impl TermTag for NewPid {
 impl Encoder for NewPid {
     type Error = anyhow::Error;
     fn encode<W: std::io::Write>(&self, w: &mut W) -> Result<(), anyhow::Error> {
-        w.write(&NEW_PID_EXT.to_be_bytes())?;
+        w.write_all(&NEW_PID_EXT.to_be_bytes())?;
         self.node.encode(w)?;
-        w.write(&self.id.to_be_bytes())?;
-        w.write(&self.serial.to_be_bytes())?;
-        w.write(&self.creation.to_be_bytes())?;
+        w.write_all(&self.id.to_be_bytes())?;
+        w.write_all(&self.serial.to_be_bytes())?;
+        w.write_all(&self.creation.to_be_bytes())?;
 
         Ok(())
     }
@@ -253,14 +250,14 @@ impl Len for NewPid {
 pub struct SmallInteger(pub u8);
 
 impl TermTag for SmallInteger {
-   const TAG: u8 = SMALL_INTEGER_EXT; 
+    const TAG: u8 = SMALL_INTEGER_EXT;
 }
 
 impl Encoder for SmallInteger {
     type Error = anyhow::Error;
     fn encode<W: std::io::Write>(&self, w: &mut W) -> Result<(), anyhow::Error> {
-        w.write(&SMALL_INTEGER_EXT.to_be_bytes())?;
-        w.write(&self.0.to_be_bytes())?;
+        w.write_all(&SMALL_INTEGER_EXT.to_be_bytes())?;
+        w.write_all(&self.0.to_be_bytes())?;
 
         Ok(())
     }
@@ -288,14 +285,14 @@ impl Len for SmallInteger {
 pub struct Integer(pub i32);
 
 impl TermTag for Integer {
-   const TAG: u8 = INTEGER_EXT; 
+    const TAG: u8 = INTEGER_EXT;
 }
 
 impl Encoder for Integer {
     type Error = anyhow::Error;
     fn encode<W: std::io::Write>(&self, w: &mut W) -> Result<(), anyhow::Error> {
-        w.write(&INTEGER_EXT.to_be_bytes())?;
-        w.write(&self.0.to_be_bytes())?;
+        w.write_all(&INTEGER_EXT.to_be_bytes())?;
+        w.write_all(&self.0.to_be_bytes())?;
 
         Ok(())
     }
@@ -364,8 +361,8 @@ impl TermTag for Float {
 impl Encoder for Float {
     type Error = anyhow::Error;
     fn encode<W: std::io::Write>(&self, w: &mut W) -> Result<(), anyhow::Error> {
-        w.write(&FLOAT_EXT.to_be_bytes())?;
-        w.write(&self.0.as_bytes())?;
+        w.write_all(&FLOAT_EXT.to_be_bytes())?;
+        w.write_all(self.0.as_bytes())?;
 
         Ok(())
     }
@@ -401,8 +398,8 @@ impl TermTag for NewFloat {
 impl Encoder for NewFloat {
     type Error = anyhow::Error;
     fn encode<W: std::io::Write>(&self, w: &mut W) -> Result<(), anyhow::Error> {
-        w.write(&NEW_FLOAT_EXT.to_be_bytes())?;
-        w.write(&self.0.to_be_bytes())?;
+        w.write_all(&NEW_FLOAT_EXT.to_be_bytes())?;
+        w.write_all(&self.0.to_be_bytes())?;
 
         Ok(())
     }
@@ -439,10 +436,10 @@ impl TermTag for Port {
 impl Encoder for Port {
     type Error = anyhow::Error;
     fn encode<W: std::io::Write>(&self, w: &mut W) -> Result<(), anyhow::Error> {
-        w.write(&PORT_EXT.to_be_bytes())?;
+        w.write_all(&PORT_EXT.to_be_bytes())?;
         self.node.encode(w)?;
-        w.write(&self.id.to_be_bytes())?;
-        w.write(&self.creation.to_be_bytes())?;
+        w.write_all(&self.id.to_be_bytes())?;
+        w.write_all(&self.creation.to_be_bytes())?;
 
         Ok(())
     }
@@ -487,10 +484,10 @@ impl TermTag for NewPort {
 impl Encoder for NewPort {
     type Error = anyhow::Error;
     fn encode<W: std::io::Write>(&self, w: &mut W) -> Result<(), anyhow::Error> {
-        w.write(&NEW_PORT_EXT.to_be_bytes())?;
+        w.write_all(&NEW_PORT_EXT.to_be_bytes())?;
         self.node.encode(w)?;
-        w.write(&self.id.to_be_bytes())?;
-        w.write(&self.creation.to_be_bytes())?;
+        w.write_all(&self.id.to_be_bytes())?;
+        w.write_all(&self.creation.to_be_bytes())?;
 
         Ok(())
     }
@@ -535,10 +532,10 @@ impl TermTag for V4Port {
 impl Encoder for V4Port {
     type Error = anyhow::Error;
     fn encode<W: std::io::Write>(&self, w: &mut W) -> Result<(), anyhow::Error> {
-        w.write(&V4_PORT_EXT.to_be_bytes())?;
+        w.write_all(&V4_PORT_EXT.to_be_bytes())?;
         self.node.encode(w)?;
-        w.write(&self.id.to_be_bytes())?;
-        w.write(&self.creation.to_be_bytes())?;
+        w.write_all(&self.id.to_be_bytes())?;
+        w.write_all(&self.creation.to_be_bytes())?;
         Ok(())
     }
 }
@@ -581,8 +578,8 @@ impl TermTag for SmallTuple {
 impl Encoder for SmallTuple {
     type Error = anyhow::Error;
     fn encode<W: std::io::Write>(&self, w: &mut W) -> Result<(), anyhow::Error> {
-        w.write(&SMALL_TUPLE_EXT.to_be_bytes())?;
-        w.write(&self.arity.to_be_bytes())?;
+        w.write_all(&SMALL_TUPLE_EXT.to_be_bytes())?;
+        w.write_all(&self.arity.to_be_bytes())?;
         for e in &self.elems {
             e.encode(w)?;
         }
@@ -607,12 +604,12 @@ impl<'a> From<&'a [u8]> for SmallTuple {
 }
 
 impl From<Vec<Term>> for SmallTuple {
-   fn from(value: Vec<Term>) -> Self {
-        Self { 
+    fn from(value: Vec<Term>) -> Self {
+        Self {
             arity: value.len() as u8,
-            elems: value
-        } 
-   } 
+            elems: value,
+        }
+    }
 }
 
 impl Len for SmallTuple {
@@ -638,8 +635,8 @@ impl TermTag for LargeTuple {
 impl Encoder for LargeTuple {
     type Error = anyhow::Error;
     fn encode<W: std::io::Write>(&self, w: &mut W) -> Result<(), anyhow::Error> {
-        let _ = w.write(&LARGE_TUPLE_EXT.to_be_bytes());
-        let _ = w.write(&self.arity.to_be_bytes());
+        let _ = w.write_all(&LARGE_TUPLE_EXT.to_be_bytes());
+        let _ = w.write_all(&self.arity.to_be_bytes());
         for e in &self.elems {
             e.encode(w)?
         }
@@ -686,8 +683,8 @@ impl TermTag for Map {
 impl Encoder for Map {
     type Error = anyhow::Error;
     fn encode<W: std::io::Write>(&self, w: &mut W) -> Result<(), anyhow::Error> {
-        let _ = w.write(&MAP_EXT.to_be_bytes());
-        let _ = w.write(&self.arity.to_be_bytes());
+        let _ = w.write_all(&MAP_EXT.to_be_bytes());
+        let _ = w.write_all(&self.arity.to_be_bytes());
         for i in 0..self.arity * 2 {
             self.pairs[i as usize].encode(w)?;
         }
@@ -731,7 +728,7 @@ impl TermTag for Nil {
 impl Encoder for Nil {
     type Error = anyhow::Error;
     fn encode<W: std::io::Write>(&self, w: &mut W) -> Result<(), anyhow::Error> {
-        w.write(&NIL_EXT.to_be_bytes())?;
+        w.write_all(&NIL_EXT.to_be_bytes())?;
 
         Ok(())
     }
@@ -767,9 +764,9 @@ impl TermTag for StringExt {
 impl Encoder for StringExt {
     type Error = anyhow::Error;
     fn encode<W: std::io::Write>(&self, w: &mut W) -> Result<(), Self::Error> {
-        w.write(&STRING_EXT.to_be_bytes())?;
-        w.write(&self.length.to_be_bytes())?;
-        w.write(&self.chars)?;
+        w.write_all(&STRING_EXT.to_be_bytes())?;
+        w.write_all(&self.length.to_be_bytes())?;
+        w.write_all(&self.chars)?;
 
         Ok(())
     }
@@ -812,8 +809,8 @@ impl TermTag for List {
 impl Encoder for List {
     type Error = anyhow::Error;
     fn encode<W: std::io::Write>(&self, w: &mut W) -> Result<(), anyhow::Error> {
-        w.write(&LIST_EXT.to_be_bytes())?;
-        w.write(&self.length.to_be_bytes())?;
+        w.write_all(&LIST_EXT.to_be_bytes())?;
+        w.write_all(&self.length.to_be_bytes())?;
         for i in 0..self.length {
             self.elems[i as usize].encode(w)?;
         }
@@ -836,7 +833,7 @@ impl<'a> From<&'a [u8]> for List {
             elems.push(term);
         });
 
-        if value.len() > 0 && value[0] == NIL_EXT {
+        if !value.is_empty() && value[0] == NIL_EXT {
             let tail = Term::from(value);
             value.advance(tail.len());
             return List {
@@ -874,15 +871,15 @@ pub struct Binary {
 }
 
 impl TermTag for Binary {
-   const TAG: u8 = BINARY_EXT; 
+    const TAG: u8 = BINARY_EXT;
 }
 
 impl Encoder for Binary {
     type Error = anyhow::Error;
     fn encode<W: std::io::Write>(&self, w: &mut W) -> Result<(), anyhow::Error> {
-        w.write(&BINARY_EXT.to_be_bytes())?;
-        w.write(&self.length.to_be_bytes())?;
-        w.write(&self.data[0..self.length as usize])?;
+        w.write_all(&BINARY_EXT.to_be_bytes())?;
+        w.write_all(&self.length.to_be_bytes())?;
+        w.write_all(&self.data[0..self.length as usize])?;
 
         Ok(())
     }
@@ -919,17 +916,17 @@ pub struct SmallBig {
 }
 
 impl TermTag for SmallBig {
-   const TAG: u8 = SMALL_BIG_EXT; 
+    const TAG: u8 = SMALL_BIG_EXT;
 }
 
 impl Encoder for SmallBig {
     type Error = anyhow::Error;
     fn encode<W: std::io::Write>(&self, w: &mut W) -> Result<(), anyhow::Error> {
-        w.write(&SMALL_BIG_EXT.to_be_bytes())?;
-        w.write(&self.length.to_be_bytes())?;
+        w.write_all(&SMALL_BIG_EXT.to_be_bytes())?;
+        w.write_all(&self.length.to_be_bytes())?;
         let sign: u8 = (&self.sign).into();
-        w.write(&sign.to_be_bytes())?;
-        w.write(&self.n.to_bytes_le().1)?;
+        w.write_all(&sign.to_be_bytes())?;
+        w.write_all(&self.n.to_bytes_le().1)?;
 
         Ok(())
     }
@@ -971,11 +968,11 @@ impl TermTag for LargeBig {
 impl Encoder for LargeBig {
     type Error = anyhow::Error;
     fn encode<W: std::io::Write>(&self, w: &mut W) -> Result<(), anyhow::Error> {
-        w.write(&LARGE_BIG_EXT.to_be_bytes())?;
-        w.write(&self.length.to_be_bytes())?;
+        w.write_all(&LARGE_BIG_EXT.to_be_bytes())?;
+        w.write_all(&self.length.to_be_bytes())?;
         let sign: u8 = (&self.sign).into();
-        w.write(&sign.to_be_bytes())?;
-        w.write(&self.n.to_bytes_le().1)?;
+        w.write_all(&sign.to_be_bytes())?;
+        w.write_all(&self.n.to_bytes_le().1)?;
 
         Ok(())
     }
@@ -1013,12 +1010,12 @@ impl TermTag for NewerReference {
 impl Encoder for NewerReference {
     type Error = anyhow::Error;
     fn encode<W: std::io::Write>(&self, w: &mut W) -> Result<(), anyhow::Error> {
-        w.write(&NEWER_REFERENCE_EXT.to_be_bytes())?;
-        w.write(&self.length.to_be_bytes())?;
+        w.write_all(&NEWER_REFERENCE_EXT.to_be_bytes())?;
+        w.write_all(&self.length.to_be_bytes())?;
         self.node.encode(w)?;
-        w.write(&self.creation.to_be_bytes())?;
+        w.write_all(&self.creation.to_be_bytes())?;
         for id in self.id.iter() {
-            w.write(&id.to_be_bytes())?;
+            w.write_all(&id.to_be_bytes())?;
         }
 
         Ok(())
@@ -1069,12 +1066,12 @@ impl TermTag for BitBinary {
 impl Encoder for BitBinary {
     type Error = anyhow::Error;
     fn encode<W: std::io::Write>(&self, w: &mut W) -> Result<(), anyhow::Error> {
-        w.write(&BIT_BINARY_EXT.to_be_bytes())?;
-        w.write(&self.length.to_be_bytes())?;
-        w.write(&self.bits.to_be_bytes())?;
+        w.write_all(&BIT_BINARY_EXT.to_be_bytes())?;
+        w.write_all(&self.length.to_be_bytes())?;
+        w.write_all(&self.bits.to_be_bytes())?;
         if !self.data.is_empty() {
             w.write_all(&self.data[0..self.length as usize - 1])?;
-            w.write(&(self.data[self.length as usize - 1] << (8 - self.bits)).to_be_bytes())?;
+            w.write_all(&(self.data[self.length as usize - 1] << (8 - self.bits)).to_be_bytes())?;
         }
 
         Ok(())
@@ -1121,7 +1118,7 @@ impl TermTag for Export {
 impl Encoder for Export {
     type Error = anyhow::Error;
     fn encode<W: std::io::Write>(&self, w: &mut W) -> Result<(), anyhow::Error> {
-        w.write(&EXPORT_EXT.to_be_bytes())?;
+        w.write_all(&EXPORT_EXT.to_be_bytes())?;
         self.module.encode(w)?;
         self.fun.encode(w)?;
         self.arity.encode(w)?;
@@ -1179,12 +1176,12 @@ impl TermTag for NewFun {
 impl Encoder for NewFun {
     type Error = anyhow::Error;
     fn encode<W: std::io::Write>(&self, w: &mut W) -> Result<(), anyhow::Error> {
-        w.write(&NEW_FUN_EXT.to_be_bytes())?;
-        w.write(&self.size.to_be_bytes())?;
-        w.write(&self.arity.to_be_bytes())?;
-        w.write(&self.uniq)?;
-        w.write(&self.index.to_be_bytes())?;
-        w.write(&self.num_free.to_be_bytes())?;
+        w.write_all(&NEW_FUN_EXT.to_be_bytes())?;
+        w.write_all(&self.size.to_be_bytes())?;
+        w.write_all(&self.arity.to_be_bytes())?;
+        w.write_all(&self.uniq)?;
+        w.write_all(&self.index.to_be_bytes())?;
+        w.write_all(&self.num_free.to_be_bytes())?;
         self.module.encode(w)?;
         self.old_index.encode(w)?;
         self.old_uniq.encode(w)?;
@@ -1261,8 +1258,8 @@ impl TermTag for Local {
 impl Encoder for Local {
     type Error = anyhow::Error;
     fn encode<W: std::io::Write>(&self, w: &mut W) -> Result<(), Self::Error> {
-        w.write(&LOCAL_EXT.to_be_bytes())?;
-        w.write(&self.0)?;
+        w.write_all(&LOCAL_EXT.to_be_bytes())?;
+        w.write_all(&self.0)?;
         Ok(())
     }
 }
@@ -1313,6 +1310,18 @@ impl Len for PidOrAtom {
             Self::Pid(v) => v.len(),
             Self::Atom(v) => v.len(),
         }
+    }
+}
+
+impl From<&NewPid> for PidOrAtom {
+    fn from(value: &NewPid) -> Self {
+        Self::Pid(value.clone())
+    }
+}
+
+impl From<&SmallAtomUtf8> for PidOrAtom {
+    fn from(value: &SmallAtomUtf8) -> Self {
+        Self::Atom(value.clone())
     }
 }
 
@@ -1461,7 +1470,7 @@ mod test {
         //let enc = vec![
         //    116, 0, 0, 0, 2, 119, 1, 97, 119, 1, 97, 119, 1, 98, 119, 1, 98,
         //];
-        let enc = vec![
+        let enc = [
             116, 0, 0, 0, 2, 97, 1, 88, 119, 8, 97, 64, 102, 101, 100, 111, 114, 97, 0, 0, 0, 115,
             0, 0, 0, 0, 101, 129, 113, 138, 119, 1, 98, 97, 1,
         ];
@@ -1473,17 +1482,17 @@ mod test {
     fn list() {
         // List { length: 1, elems: [List(List { length: 2, elems: [SmallAtomUtf8(SmallAtomUtf8("a")),
         // SmallAtomUtf8(SmallAtomUtf8("b"))], tail: Nil(Nil) })], tail: SmallAtomUtf8(SmallAtomUtf8("c")) }
-        let enc = vec![
+        let enc = [
             108, 0, 0, 0, 1, 108, 0, 0, 0, 2, 119, 1, 97, 119, 1, 98, 106, 119, 1, 99,
         ];
         let l = List::from(&enc[..]);
         println!("{:?}", l);
         let tail = SmallAtomUtf8::try_from(*l.tail).unwrap();
         assert_eq!(tail.0, "c");
-        let enc = vec![108, 0, 0, 0, 2, 119, 1, 97, 119, 1, 98, 119, 1, 99];
+        let enc = [108, 0, 0, 0, 2, 119, 1, 97, 119, 1, 98, 119, 1, 99];
         let l = List::from(&enc[..]);
         println!("{:?}", l);
-        let enc = vec![108, 0, 0, 0, 2, 119, 1, 97, 119, 1, 98, 106];
+        let enc = [108, 0, 0, 0, 2, 119, 1, 97, 119, 1, 98, 106];
         let l = Term::from(&enc[..]);
         println!("{:?}", l);
     }

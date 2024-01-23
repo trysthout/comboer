@@ -1,12 +1,11 @@
-use std::fmt::Debug;
-use std::slice::{Iter, Chunks};
 use std::convert::TryFrom;
+use std::fmt::Debug;
+use std::slice::{Chunks, Iter};
 
-use serde::de::{self, Visitor, DeserializeSeed, EnumAccess, VariantAccess};
+use super::{error::Error, term::*};
 use num_traits::cast::*;
+use serde::de::{self, DeserializeSeed, EnumAccess, VariantAccess, Visitor};
 use serde::forward_to_deserialize_any;
-use super::{term::*, error::Error};
-
 
 pub struct Deserializer<'de> {
     input: &'de Term,
@@ -28,19 +27,13 @@ where
 }
 
 impl<'de> Deserializer<'de> {
-    // Parse the atom identifier `true` or `false`.  
+    // Parse the atom identifier `true` or `false`.
     fn parse_bool(&self) -> Result<bool, Error> {
         match self.input {
-            Term::SmallAtomUtf8(v) => {
-                match v.0.as_str() {
-                    "true" => {
-                        Ok(true)
-                    },
-                    "false" => {
-                        Ok(false)
-                    },
-                    _ => Err(Error::InvalidBoolean)
-                }
+            Term::SmallAtomUtf8(v) => match v.0.as_str() {
+                "true" => Ok(true),
+                "false" => Ok(false),
+                _ => Err(Error::InvalidBoolean),
             },
             _ => Err(Error::ExpectedBoolean),
         }
@@ -48,67 +41,47 @@ impl<'de> Deserializer<'de> {
 
     fn parse_number<T: FromPrimitive + Debug>(&self) -> Result<T, Error> {
         match self.input {
-           Term::SmallInteger(v) => {
-                T::from_u8(v.0).ok_or_else(|| Error::InvalidPrimitiveNumber)
-           },
-           Term::Integer(v) => {
-                T::from_i32(v.0).ok_or_else(|| Error::InvalidPrimitiveNumber)
-           },
-           
-           Term::NewFloat(v) => {
-                T::from_f64(v.0).ok_or_else(|| Error::InvalidPrimitiveNumber)
-           },
-           _ =>  {
-            Err(Error::ExpectedPrimitiveNumber) 
-           }
+            Term::SmallInteger(v) => T::from_u8(v.0).ok_or(Error::InvalidPrimitiveNumber),
+            Term::Integer(v) => T::from_i32(v.0).ok_or(Error::InvalidPrimitiveNumber),
+
+            Term::NewFloat(v) => T::from_f64(v.0).ok_or(Error::InvalidPrimitiveNumber),
+            _ => Err(Error::ExpectedPrimitiveNumber),
         }
     }
 
     fn parse_bigint<T: TryFrom<&'de num_bigint::BigInt>>(&self) -> Result<T, Error> {
         match self.input {
-           Term::SmallBig(v) => {
-                T::try_from(&v.n).map_err(|_| { 
-                        Error::TryFromBigIntError(format!("Cannot to attempt conversion from bigint type: {}", &v.n))
-                    }
-                )
-           },
-           _ => Err(Error::ExpectedBigInt)
+            Term::SmallBig(v) => T::try_from(&v.n).map_err(|_| {
+                Error::TryFromBigIntError(format!(
+                    "Cannot to attempt conversion from bigint type: {}",
+                    &v.n
+                ))
+            }),
+            _ => Err(Error::ExpectedBigInt),
         }
     }
 
     fn parse_string(&self) -> Result<String, Error> {
         match self.input {
-            Term::SmallAtomUtf8(v) => {
-                Ok(v.0.clone())
-            }
-            Term::AtomUtf8(v) => { 
-                Ok(v.0.clone())
-            }
-            Term::Binary(v) => {
-                Ok(String::from_utf8_lossy(&v.data).to_string())
-            }
-            Term::StringExt(v) => {
-                Ok(String::from_utf8_lossy(&v.chars).to_string())
-            }
-            _ =>  Err(Error::ExpectedString)
+            Term::SmallAtomUtf8(v) => Ok(v.0.clone()),
+            Term::AtomUtf8(v) => Ok(v.0.clone()),
+            Term::Binary(v) => Ok(String::from_utf8_lossy(&v.data).to_string()),
+            Term::StringExt(v) => Ok(String::from_utf8_lossy(&v.chars).to_string()),
+            _ => Err(Error::ExpectedString),
         }
     }
 
     fn parse_binary(&self) -> Result<&[u8], Error> {
         match self.input {
-            Term::Binary(v) => {
-                Ok(&v.data)
-            },
-            _ => Err(Error::ExpectedBytes)
+            Term::Binary(v) => Ok(&v.data),
+            _ => Err(Error::ExpectedBytes),
         }
     }
 
     fn is_none(&self) -> Result<bool, Error> {
         match self.input {
-           Term::Nil(_) => {
-                Ok(true)
-           },
-           _ => Ok(false)
+            Term::Nil(_) => Ok(true),
+            _ => Ok(false),
         }
     }
 }
@@ -122,7 +95,6 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     {
         Err(Error::ExpectedType)
     }
-
 
     fn deserialize_bool<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
@@ -191,21 +163,25 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: Visitor<'de>,
     {
-       visitor.visit_f32(self.parse_number()?) 
+        visitor.visit_f32(self.parse_number()?)
     }
 
     fn deserialize_f64<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
-       visitor.visit_f64(self.parse_number()?) 
+        visitor.visit_f64(self.parse_number()?)
     }
 
     fn deserialize_char<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
-        let c = self.parse_string()?.chars().next().ok_or_else(|| Error::ExpectedChar)?;
+        let c = self
+            .parse_string()?
+            .chars()
+            .next()
+            .ok_or(Error::ExpectedChar)?;
         visitor.visit_char(c)
     }
 
@@ -227,7 +203,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: Visitor<'de>,
     {
-        visitor.visit_bytes(&self.parse_binary()?)
+        visitor.visit_bytes(self.parse_binary()?)
     }
 
     fn deserialize_byte_buf<V>(self, visitor: V) -> Result<V::Value, Self::Error>
@@ -293,16 +269,11 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         V: Visitor<'de>,
     {
         match self.input {
-            Term::List(v) => {
-                visitor.visit_seq(DeserializerSeq::new(&v.elems))
-            },
-            Term::Binary(v) => {
-                visitor.visit_byte_buf(v.data.clone())
-            }
- 
-            _ => Err(Error::ExpectedList)
-         }
-         
+            Term::List(v) => visitor.visit_seq(DeserializerSeq::new(&v.elems)),
+            Term::Binary(v) => visitor.visit_byte_buf(v.data.clone()),
+
+            _ => Err(Error::ExpectedList),
+        }
     }
 
     // Tuples look just like sequences in JSON. Some formats may be able to
@@ -316,13 +287,9 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         V: Visitor<'de>,
     {
         match self.input {
-           Term::SmallTuple(v) => {
-                visitor.visit_seq(DeserializerSeq::new(&v.elems))
-           },
-           Term::LargeTuple(v) => {
-                visitor.visit_seq(DeserializerSeq::new(&v.elems))
-           }
-           _ => Err(Error::ExpectedTuple)
+            Term::SmallTuple(v) => visitor.visit_seq(DeserializerSeq::new(&v.elems)),
+            Term::LargeTuple(v) => visitor.visit_seq(DeserializerSeq::new(&v.elems)),
+            _ => Err(Error::ExpectedTuple),
         }
     }
 
@@ -346,12 +313,9 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         V: Visitor<'de>,
     {
         match self.input {
-            Term::Map(v) => {
-                visitor.visit_map(DeserializerMap::new(&v.pairs))
-            },
-            _ => Err(Error::ExpectedMap)
+            Term::Map(v) => visitor.visit_map(DeserializerMap::new(&v.pairs)),
+            _ => Err(Error::ExpectedMap),
         }
-        
     }
 
     fn deserialize_struct<V>(
@@ -378,17 +342,16 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         match self.input {
             v @ Term::SmallAtomUtf8(_) | v @ Term::AtomUtf8(_) => {
                 visitor.visit_enum(DeserializerEnumUnit::new(v))
-            },
-            Term::SmallTuple(SmallTuple { arity:_, elems }) | Term::LargeTuple( LargeTuple { arity: _, elems}) => 
-                match elems.as_slice() {
-                    [variant, value] => {
-                        visitor.visit_enum(DeserializerEnum::new(self, (&variant, &value)))
-                    }
-                    _ => Err(Error::InvalidEnumTuple),
+            }
+            Term::SmallTuple(SmallTuple { arity: _, elems })
+            | Term::LargeTuple(LargeTuple { arity: _, elems }) => match elems.as_slice() {
+                [variant, value] => {
+                    visitor.visit_enum(DeserializerEnum::new(self, (&variant, &value)))
+                }
+                _ => Err(Error::InvalidEnumTuple),
             },
             _ => Err(Error::ExpectedAtomOrTuple),
         }
-
     }
 
     // An identifier in Serde is the type that identifies a field of a struct or
@@ -422,7 +385,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
 }
 
 struct DeserializerSeq<'de> {
-    input: Iter<'de, Term>
+    input: Iter<'de, Term>,
 }
 
 impl<'de> DeserializerSeq<'de> {
@@ -441,7 +404,9 @@ impl<'de> de::SeqAccess<'de> for DeserializerSeq<'de> {
         T: DeserializeSeed<'de>,
     {
         match self.input.next() {
-            Some(item) => seed.deserialize(&mut Deserializer::from_term(&item)).map(Some),
+            Some(item) => seed
+                .deserialize(&mut Deserializer::from_term(item))
+                .map(Some),
             None => Ok(None),
         }
     }
@@ -478,12 +443,10 @@ impl<'de> de::MapAccess<'de> for DeserializerMap<'de> {
                 self.current_value = Some(&pair[1]);
 
                 seed.deserialize(&mut Deserializer::from_term(k)).map(Some)
+            }
 
-            },
-
-            None => Ok(None)
+            None => Ok(None),
         }
-
     }
 
     fn next_value_seed<V>(&mut self, seed: V) -> Result<V::Value, Self::Error>
@@ -494,8 +457,8 @@ impl<'de> de::MapAccess<'de> for DeserializerMap<'de> {
             Some(v) => {
                 self.current_value = None;
                 seed.deserialize(&mut Deserializer::from_term(v))
-            },
-            None => Err(Error::InvalidMapPair) 
+            }
+            None => Err(Error::InvalidMapPair),
         }
     }
 }
@@ -506,12 +469,12 @@ pub struct DeserializerEnum<'a, 'de: 'a> {
 }
 
 impl<'a, 'de> DeserializerEnum<'a, 'de> {
-   fn new(de: &'a mut Deserializer<'de>, input: (&'de Term, &'de Term)) -> DeserializerEnum<'a, 'de> {
-        DeserializerEnum { 
-            _de: de,
-            input
-        }
-   }
+    fn new(
+        de: &'a mut Deserializer<'de>,
+        input: (&'de Term, &'de Term),
+    ) -> DeserializerEnum<'a, 'de> {
+        DeserializerEnum { _de: de, input }
+    }
 }
 
 impl<'a, 'de> EnumAccess<'de> for DeserializerEnum<'a, 'de> {
@@ -521,9 +484,10 @@ impl<'a, 'de> EnumAccess<'de> for DeserializerEnum<'a, 'de> {
 
     fn variant_seed<V>(self, seed: V) -> Result<(V::Value, Self::Variant), Self::Error>
     where
-        V: DeserializeSeed<'de> {
-            let v = seed.deserialize(DeserializerEnumVariant::new(self.input.0))?;
-            Ok((v, self))
+        V: DeserializeSeed<'de>,
+    {
+        let v = seed.deserialize(DeserializerEnumVariant::new(self.input.0))?;
+        Ok((v, self))
     }
 }
 
@@ -538,20 +502,24 @@ impl<'a, 'de> VariantAccess<'de> for DeserializerEnum<'a, 'de> {
     where
         T: DeserializeSeed<'de>,
     {
-        seed.deserialize(&mut Deserializer::from_term(&self.input.1))
+        seed.deserialize(&mut Deserializer::from_term(self.input.1))
     }
 
     fn tuple_variant<V>(self, len: usize, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
-        let mut deserializer = Deserializer::from_term(&self.input.1);
+        let mut deserializer = Deserializer::from_term(self.input.1);
         de::Deserializer::deserialize_tuple(&mut deserializer, len, visitor)
     }
 
     // Struct variants are represented in JSON as `{ NAME: { K: V, ... } }` so
     // deserialize the inner map here.
-    fn struct_variant<V>(self, _fields: &'static [&'static str], visitor: V) -> Result<V::Value, Self::Error>
+    fn struct_variant<V>(
+        self,
+        _fields: &'static [&'static str],
+        visitor: V,
+    ) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
@@ -565,11 +533,10 @@ struct DeserializerEnumUnit<'de> {
 }
 
 impl<'de> DeserializerEnumUnit<'de> {
-   fn new(input: &'de Term) -> DeserializerEnumUnit<'de> {
+    fn new(input: &'de Term) -> DeserializerEnumUnit<'de> {
         DeserializerEnumUnit { input }
-   } 
+    }
 }
-
 
 impl<'de> EnumAccess<'de> for DeserializerEnumUnit<'de> {
     type Error = Error;
@@ -578,9 +545,10 @@ impl<'de> EnumAccess<'de> for DeserializerEnumUnit<'de> {
 
     fn variant_seed<V>(self, seed: V) -> Result<(V::Value, Self::Variant), Self::Error>
     where
-        V: DeserializeSeed<'de> {
-            let v = seed.deserialize(&mut Deserializer::from_term(self.input))?;
-            Ok((v, self))
+        V: DeserializeSeed<'de>,
+    {
+        let v = seed.deserialize(&mut Deserializer::from_term(self.input))?;
+        Ok((v, self))
     }
 }
 
@@ -607,7 +575,11 @@ impl<'a, 'de> VariantAccess<'de> for DeserializerEnumUnit<'a> {
 
     // Struct variants are represented in JSON as `{ NAME: { K: V, ... } }` so
     // deserialize the inner map here.
-    fn struct_variant<V>(self, _fields: &'static [&'static str], _visitor: V) -> Result<V::Value, Self::Error>
+    fn struct_variant<V>(
+        self,
+        _fields: &'static [&'static str],
+        _visitor: V,
+    ) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
@@ -621,7 +593,7 @@ struct DeserializerEnumVariant<'a> {
 
 impl<'a> DeserializerEnumVariant<'a> {
     pub fn new(input: &'a Term) -> Self {
-        DeserializerEnumVariant { input } 
+        DeserializerEnumVariant { input }
     }
 }
 
@@ -650,17 +622,17 @@ impl<'de, 'a: 'de> de::Deserializer<'de> for DeserializerEnumVariant<'a> {
 mod test {
     use serde_derive::Deserialize;
 
-    use crate::etf::{term::*, de::from_term, Sign};
+    use crate::etf::{de::from_term, term::*, Sign};
 
     #[test]
     fn der_struct() {
         #[derive(Debug, Deserialize)]
         struct T1 {
-           v1: u16, 
-           v2: String,
+            v1: u16,
+            v2: String,
         }
 
-        let t = Term::Map(Map{
+        let t = Term::Map(Map {
             arity: 2,
             pairs: vec![
                 SmallAtomUtf8("v1".to_string()).into(),
@@ -669,32 +641,35 @@ mod test {
                 Binary {
                     length: 5,
                     data: "hello".as_bytes().to_vec(),
-                }.into(),
+                }
+                .into(),
             ],
         });
 
         let der = from_term::<T1>(&t).unwrap();
-        
+
         assert_eq!(der.v1, 8);
         assert_eq!(der.v2, "hello");
         println!("{:?}", der);
 
         #[derive(Debug, Deserialize)]
         struct T2(u16, u64, #[serde(with = "serde_bytes")] Vec<u8>);
-        let t = Term::SmallTuple(SmallTuple { 
-            arity: 3, 
+        let t = Term::SmallTuple(SmallTuple {
+            arity: 3,
             elems: vec![
                 SmallInteger(8).into(),
                 SmallBig {
                     length: 8,
                     sign: Sign::Positive,
                     n: 11111111111111111_u64.into(),
-                }.into(),
+                }
+                .into(),
                 Binary {
                     length: 5,
                     data: "hello".as_bytes().to_vec(),
-                }.into(),
-            ] 
+                }
+                .into(),
+            ],
         });
         let der = from_term::<T2>(&t).unwrap();
         println!("{:?}", der);
@@ -722,7 +697,7 @@ mod test {
         #[derive(Debug, Deserialize, PartialEq)]
         enum T1 {
             A,
-            B
+            B,
         }
 
         let der = from_term::<T1>(&Term::SmallAtomUtf8(SmallAtomUtf8("A".to_string()))).unwrap();
@@ -732,61 +707,69 @@ mod test {
         #[derive(Debug, Deserialize, PartialEq)]
         enum T2 {
             A,
-            B { a: String, b: Vec<u8>},
+            B { a: String, b: Vec<u8> },
         }
 
-        let der = from_term::<T2>(&Term::SmallTuple(
-            SmallTuple { 
-                arity: 2, 
-                elems: vec![
-                    SmallAtomUtf8("B".to_string()).into(),
-                    Map{
-                        arity: 1,
-                        pairs: vec![
-                            SmallAtomUtf8("a".to_string()).into(),
-                            SmallAtomUtf8("123".to_string()).into(),
-                            SmallAtomUtf8("b".to_string()).into(),
-                            List {
-                                length: 3,
-                                elems: vec![
-                                    SmallInteger(1).into(),
-                                    SmallInteger(2).into(),
-                                    SmallInteger(3).into(),
-                                ],
-                                tail: Box::new(Term::Nil(Nil))
-                            }.into(),
-                        ],
-                    }.into(),
-                ],
-            }
-        )).unwrap();
+        let der = from_term::<T2>(&Term::SmallTuple(SmallTuple {
+            arity: 2,
+            elems: vec![
+                SmallAtomUtf8("B".to_string()).into(),
+                Map {
+                    arity: 1,
+                    pairs: vec![
+                        SmallAtomUtf8("a".to_string()).into(),
+                        SmallAtomUtf8("123".to_string()).into(),
+                        SmallAtomUtf8("b".to_string()).into(),
+                        List {
+                            length: 3,
+                            elems: vec![
+                                SmallInteger(1).into(),
+                                SmallInteger(2).into(),
+                                SmallInteger(3).into(),
+                            ],
+                            tail: Box::new(Term::Nil(Nil)),
+                        }
+                        .into(),
+                    ],
+                }
+                .into(),
+            ],
+        }))
+        .unwrap();
         println!("{:?}", der);
-        assert_eq!(T2::B { a: "123".to_string(), b: vec![1,2,3] }, der);
+        assert_eq!(
+            T2::B {
+                a: "123".to_string(),
+                b: vec![1, 2, 3]
+            },
+            der
+        );
 
         #[derive(Debug, Deserialize, PartialEq)]
         enum T3 {
-            A(String, u32)
+            A(String, u32),
         }
 
-        let der = from_term::<T3>(&Term::SmallTuple(
-            SmallTuple { 
-                arity: 2, 
-                elems: vec![
-                    SmallAtomUtf8("A".to_string()).into(),
-                    SmallTuple{
-                        arity: 2,
-                        elems: vec![
-                            SmallAtomUtf8("A".to_string()).into(),
-                            SmallBig {
-                                length: 8,
-                                sign: Sign::Positive,
-                                n: 111111111_u32.into(),
-                            }.into(),
-                        ],
-                    }.into(),
-                ],
-            }
-        )).unwrap();
+        let der = from_term::<T3>(&Term::SmallTuple(SmallTuple {
+            arity: 2,
+            elems: vec![
+                SmallAtomUtf8("A".to_string()).into(),
+                SmallTuple {
+                    arity: 2,
+                    elems: vec![
+                        SmallAtomUtf8("A".to_string()).into(),
+                        SmallBig {
+                            length: 8,
+                            sign: Sign::Positive,
+                            n: 111111111_u32.into(),
+                        }
+                        .into(),
+                    ],
+                }
+                .into(),
+            ],
+        }))
+        .unwrap();
         println!("{:?}", der);
         assert_eq!(T3::A("A".to_string(), 111111111_u32), der);
     }

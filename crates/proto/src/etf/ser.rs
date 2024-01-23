@@ -1,7 +1,7 @@
 use num_bigint::BigInt;
 use serde::{ser, Serialize};
 
-use super::{term::*, error::Error, Sign};
+use super::{error::Error, term::*, Sign};
 
 pub struct Serializer;
 
@@ -34,14 +34,9 @@ impl<'a> ser::Serializer for &'a mut Serializer {
     type SerializeStructVariant = SerializeSeq<'a>;
 
     fn serialize_bool(self, v: bool) -> Result<Self::Ok, Self::Error> {
-        let v = if v {
-            "true"
-        } else {
-            "false"
-        };
+        let v = if v { "true" } else { "false" };
 
         Ok(Term::from(SmallAtomUtf8(v.to_string())))
-        
     }
 
     fn serialize_i8(self, v: i8) -> Result<Self::Ok, Self::Error> {
@@ -63,15 +58,11 @@ impl<'a> ser::Serializer for &'a mut Serializer {
             Sign::Negative
         };
 
-        Ok(
-            Term::from(
-                SmallBig {
-                    length: 8,
-                    sign: sign.clone(),
-                    n: BigInt::from_bytes_le((&sign).into(), &v.to_le_bytes()) ,
-                }
-            )
-        )
+        Ok(Term::from(SmallBig {
+            length: 8,
+            sign: sign.clone(),
+            n: BigInt::from_bytes_le((&sign).into(), &v.to_le_bytes()),
+        }))
     }
 
     fn serialize_u8(self, v: u8) -> Result<Self::Ok, Self::Error> {
@@ -84,28 +75,20 @@ impl<'a> ser::Serializer for &'a mut Serializer {
 
     fn serialize_u32(self, v: u32) -> Result<Self::Ok, Self::Error> {
         let sign = Sign::Positive;
-        Ok(
-            Term::from(
-                SmallBig {
-                    length: 4,
-                    sign: sign.clone(),
-                    n: BigInt::from_bytes_le((&sign).into(), &v.to_le_bytes()) ,
-                }
-            )
-        )
+        Ok(Term::from(SmallBig {
+            length: 4,
+            sign: sign.clone(),
+            n: BigInt::from_bytes_le((&sign).into(), &v.to_le_bytes()),
+        }))
     }
 
     fn serialize_u64(self, v: u64) -> Result<Self::Ok, Self::Error> {
         let sign = Sign::Positive;
-        Ok(
-            Term::from(
-                SmallBig {
-                    length: 8,
-                    sign: sign.clone(),
-                    n: BigInt::from_bytes_le((&sign).into(), &v.to_le_bytes()) ,
-                }
-            )
-        )
+        Ok(Term::from(SmallBig {
+            length: 8,
+            sign: sign.clone(),
+            n: BigInt::from_bytes_le((&sign).into(), &v.to_le_bytes()),
+        }))
     }
 
     fn serialize_f32(self, v: f32) -> Result<Self::Ok, Self::Error> {
@@ -113,7 +96,7 @@ impl<'a> ser::Serializer for &'a mut Serializer {
     }
 
     fn serialize_f64(self, v: f64) -> Result<Self::Ok, Self::Error> {
-        Ok(Term::from( NewFloat(v)))
+        Ok(Term::from(NewFloat(v)))
     }
 
     fn serialize_char(self, v: char) -> Result<Self::Ok, Self::Error> {
@@ -134,7 +117,8 @@ impl<'a> ser::Serializer for &'a mut Serializer {
 
     fn serialize_some<T: ?Sized>(self, value: &T) -> Result<Self::Ok, Self::Error>
     where
-        T: Serialize {
+        T: Serialize,
+    {
         value.serialize(self)
     }
 
@@ -161,8 +145,9 @@ impl<'a> ser::Serializer for &'a mut Serializer {
         value: &T,
     ) -> Result<Self::Ok, Self::Error>
     where
-        T: Serialize {
-            value.serialize(self)
+        T: Serialize,
+    {
+        value.serialize(self)
     }
 
     fn serialize_newtype_variant<T: ?Sized>(
@@ -173,30 +158,30 @@ impl<'a> ser::Serializer for &'a mut Serializer {
         value: &T,
     ) -> Result<Self::Ok, Self::Error>
     where
-        T: Serialize {
-            let value = value.serialize(self)?;
-            Ok(Term::SmallTuple(
-                SmallTuple { 
-                    arity: 2, 
-                    elems: vec![
-                        Term::from(SmallAtomUtf8(variant.to_string())),
-                        value,
-                    ]
-                }
-            ))
+        T: Serialize,
+    {
+        let value = value.serialize(self)?;
+        Ok(Term::SmallTuple(SmallTuple {
+            arity: 2,
+            elems: vec![Term::from(SmallAtomUtf8(variant.to_string())), value],
+        }))
     }
 
     fn serialize_seq(self, len: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
-        let elems = len.map(|x| Vec::with_capacity(x)).unwrap_or_default();
-        Ok(
-            SerializeSeq { ser: self, elems, name: None }
-        )
+        let elems = len.map(Vec::with_capacity).unwrap_or_default();
+        Ok(SerializeSeq {
+            ser: self,
+            elems,
+            name: None,
+        })
     }
 
     fn serialize_tuple(self, len: usize) -> Result<Self::SerializeTuple, Self::Error> {
-        Ok(
-            SerializeSeq { ser: self, elems: Vec::with_capacity(len), name: None }
-        )
+        Ok(SerializeSeq {
+            ser: self,
+            elems: Vec::with_capacity(len),
+            name: None,
+        })
     }
 
     fn serialize_tuple_struct(
@@ -204,9 +189,11 @@ impl<'a> ser::Serializer for &'a mut Serializer {
         _name: &'static str,
         len: usize,
     ) -> Result<Self::SerializeTupleStruct, Self::Error> {
-        Ok(
-            SerializeSeq { ser: self, elems: Vec::with_capacity(len), name: None }
-        )
+        Ok(SerializeSeq {
+            ser: self,
+            elems: Vec::with_capacity(len),
+            name: None,
+        })
     }
 
     fn serialize_tuple_variant(
@@ -216,16 +203,20 @@ impl<'a> ser::Serializer for &'a mut Serializer {
         variant: &'static str,
         len: usize,
     ) -> Result<Self::SerializeTupleVariant, Self::Error> {
-        Ok(
-            SerializeSeq { ser: self, elems: Vec::with_capacity(len), name: Some(variant) }
-        )
+        Ok(SerializeSeq {
+            ser: self,
+            elems: Vec::with_capacity(len),
+            name: Some(variant),
+        })
     }
 
     fn serialize_map(self, len: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
-        let elems = len.map(|x| Vec::with_capacity(x)).unwrap_or_default();
-        Ok(
-            SerializeSeq { ser: self, elems, name: None }
-        )
+        let elems = len.map(Vec::with_capacity).unwrap_or_default();
+        Ok(SerializeSeq {
+            ser: self,
+            elems,
+            name: None,
+        })
     }
 
     fn serialize_struct(
@@ -233,9 +224,11 @@ impl<'a> ser::Serializer for &'a mut Serializer {
         _name: &'static str,
         len: usize,
     ) -> Result<Self::SerializeStruct, Self::Error> {
-        Ok(
-            SerializeSeq { ser: self, elems: Vec::with_capacity(len), name: None }
-        )
+        Ok(SerializeSeq {
+            ser: self,
+            elems: Vec::with_capacity(len),
+            name: None,
+        })
     }
 
     fn serialize_struct_variant(
@@ -245,9 +238,11 @@ impl<'a> ser::Serializer for &'a mut Serializer {
         variant: &'static str,
         len: usize,
     ) -> Result<Self::SerializeStructVariant, Self::Error> {
-        Ok(
-            SerializeSeq { ser: self, elems: Vec::with_capacity(len), name: Some(variant) }
-        )
+        Ok(SerializeSeq {
+            ser: self,
+            elems: Vec::with_capacity(len),
+            name: Some(variant),
+        })
     }
 }
 
@@ -255,7 +250,7 @@ pub struct SerializeSeq<'a> {
     ser: &'a mut Serializer,
     // Only used by tuple variant
     name: Option<&'a str>,
-    elems: Vec<Term>
+    elems: Vec<Term>,
 }
 
 impl<'a> ser::SerializeSeq for SerializeSeq<'a> {
@@ -277,17 +272,13 @@ impl<'a> ser::SerializeSeq for SerializeSeq<'a> {
 
     // Close the sequence.
     fn end(self) -> Result<Self::Ok, Self::Error> {
-       Ok(
-        Term::List(
-            List{
-                length: self.elems.len() as u32,
-                elems: self.elems,
-                tail: Box::new(Term::Nil(Nil)),
-            })
-        )
+        Ok(Term::List(List {
+            length: self.elems.len() as u32,
+            elems: self.elems,
+            tail: Box::new(Term::Nil(Nil)),
+        }))
     }
 }
-
 
 impl<'a> ser::SerializeTuple for SerializeSeq<'a> {
     type Ok = Term;
@@ -298,7 +289,6 @@ impl<'a> ser::SerializeTuple for SerializeSeq<'a> {
     where
         T: ?Sized + Serialize,
     {
-
         let v = value.serialize(&mut *self.ser)?;
         self.elems.push(v);
         Ok(())
@@ -306,19 +296,15 @@ impl<'a> ser::SerializeTuple for SerializeSeq<'a> {
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
         let term = if self.elems.len() > u8::MAX as usize {
-            Term::LargeTuple(
-                LargeTuple { 
-                    arity: self.elems.len() as u32, 
-                    elems: self.elems,
-                }
-            )
+            Term::LargeTuple(LargeTuple {
+                arity: self.elems.len() as u32,
+                elems: self.elems,
+            })
         } else {
-            Term::SmallTuple(
-                SmallTuple { 
-                    arity: self.elems.len() as u8, 
-                    elems: self.elems,
-                }
-            )
+            Term::SmallTuple(SmallTuple {
+                arity: self.elems.len() as u8,
+                elems: self.elems,
+            })
         };
 
         Ok(term)
@@ -341,19 +327,15 @@ impl<'a> ser::SerializeTupleStruct for SerializeSeq<'a> {
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
         let term = if self.elems.len() > u8::MAX as usize {
-            Term::LargeTuple(
-                LargeTuple { 
-                    arity: self.elems.len() as u32, 
-                    elems: self.elems,
-                }
-            )
+            Term::LargeTuple(LargeTuple {
+                arity: self.elems.len() as u32,
+                elems: self.elems,
+            })
         } else {
-            Term::SmallTuple(
-                SmallTuple { 
-                    arity: self.elems.len() as u8, 
-                    elems: self.elems,
-                }
-            )
+            Term::SmallTuple(SmallTuple {
+                arity: self.elems.len() as u8,
+                elems: self.elems,
+            })
         };
 
         Ok(term)
@@ -376,33 +358,23 @@ impl<'a> ser::SerializeTupleVariant for SerializeSeq<'a> {
     // TupleVariant serizalized a tuple { name, {elems}}
     fn end(self) -> Result<Self::Ok, Self::Error> {
         let data = if self.elems.len() > u8::MAX as usize {
-            Term::LargeTuple(
-                LargeTuple { 
-                    arity: self.elems.len() as u32, 
-                    elems: self.elems,
-                }
-            )
+            Term::LargeTuple(LargeTuple {
+                arity: self.elems.len() as u32,
+                elems: self.elems,
+            })
         } else {
-            Term::SmallTuple(
-                SmallTuple { 
-                    arity: self.elems.len() as u8, 
-                    elems: self.elems,
-                }
-            )
+            Term::SmallTuple(SmallTuple {
+                arity: self.elems.len() as u8,
+                elems: self.elems,
+            })
         };
 
-        Ok(
-            Term::SmallTuple(SmallTuple {
-                arity: 2,
-                elems: vec![
-                    SmallAtomUtf8(self.name.unwrap().to_string()).into(),
-                    data,
-                ]
-            })
-        )
+        Ok(Term::SmallTuple(SmallTuple {
+            arity: 2,
+            elems: vec![SmallAtomUtf8(self.name.unwrap().to_string()).into(), data],
+        }))
     }
 }
-
 
 impl<'a> ser::SerializeMap for SerializeSeq<'a> {
     type Ok = Term;
@@ -427,17 +399,12 @@ impl<'a> ser::SerializeMap for SerializeSeq<'a> {
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        Ok(
-            Term::Map(
-                Map {
-                    arity: (self.elems.len() / 2) as u32,
-                    pairs: self.elems,
-                }
-            )
-        )
+        Ok(Term::Map(Map {
+            arity: (self.elems.len() / 2) as u32,
+            pairs: self.elems,
+        }))
     }
 }
-
 
 impl<'a> ser::SerializeStruct for SerializeSeq<'a> {
     type Ok = Term;
@@ -454,17 +421,12 @@ impl<'a> ser::SerializeStruct for SerializeSeq<'a> {
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        Ok(
-            Term::Map(
-                Map {
-                    arity: (self.elems.len() / 2) as u32,
-                    pairs: self.elems,
-                }
-            )
-        )
+        Ok(Term::Map(Map {
+            arity: (self.elems.len() / 2) as u32,
+            pairs: self.elems,
+        }))
     }
 }
-
 
 impl<'a> ser::SerializeStructVariant for SerializeSeq<'a> {
     type Ok = Term;
@@ -481,60 +443,61 @@ impl<'a> ser::SerializeStructVariant for SerializeSeq<'a> {
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        Ok(
-            Term::SmallTuple(
-                SmallTuple { 
-                    arity: 2, 
-                    elems: vec![
-                        SmallAtomUtf8(self.name.unwrap().to_string()).into(),
-                        Term::Map(
-                            Map {
-                                arity: (self.elems.len() / 2) as u32,
-                                pairs: self.elems,
-                            }
-                        )
-                    ] 
-                }
-            )
-        )
+        Ok(Term::SmallTuple(SmallTuple {
+            arity: 2,
+            elems: vec![
+                SmallAtomUtf8(self.name.unwrap().to_string()).into(),
+                Term::Map(Map {
+                    arity: (self.elems.len() / 2) as u32,
+                    pairs: self.elems,
+                }),
+            ],
+        }))
     }
 }
 
-
 #[cfg(test)]
 mod test {
-    use serde_derive::Serialize;
     use super::*;
+    use serde_derive::Serialize;
 
     #[test]
     fn ser_struct() {
         #[derive(Debug, Serialize)]
         struct T1 {
             k: u32,
-            v: String
+            v: String,
         }
-        
+
         let v1 = T1 {
             k: 2,
-            v: "ser".to_string()
+            v: "ser".to_string(),
         };
 
         let v = to_term(&v1);
         println!("{:?}", v);
 
-
         #[derive(Debug, Serialize)]
         struct T2(u8, T1);
-        let v2 = T2(3, T1 { k: 3, v: "ser".to_string() });
+        let v2 = T2(
+            3,
+            T1 {
+                k: 3,
+                v: "ser".to_string(),
+            },
+        );
         let v = to_term(&v2);
         println!("{:?}", v);
 
         // struct variants
         #[derive(Debug, Serialize)]
         enum T3 {
-            Baz { a: u16, b: String }
+            Baz { a: u16, b: String },
         }
-        let v3 = T3::Baz { a: 10, b: "variants".to_string() };
+        let v3 = T3::Baz {
+            a: 10,
+            b: "variants".to_string(),
+        };
         let v = to_term(&v3);
         println!("{:?}", v);
     }
