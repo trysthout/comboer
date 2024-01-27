@@ -7,7 +7,7 @@ use std::{
 use byteorder::{BigEndian, ByteOrder};
 
 use proto::{
-    etf::term::{self, NewPid, NewerReference},
+    etf::term::{self},
     handshake::{HandshakeCodec, HandshakeVersion, Status},
     CtrlMsg, Dist, Encoder, EpmdClient, Len,
 };
@@ -395,15 +395,11 @@ impl Session {
             .read_exact(&mut buf[..length])
             .await
             .map_err(Error::from)?;
-        match buf[0] {
-            112 => {
-                let dist = Dist::try_from(&buf[..length]).map_err(Error::from)?;
-                handler =
-                    Self::handle_ctrl(dist.ctrl_msg.clone(), dist.msg.clone(), handler, &mut node)
-                        .await?;
-                //let msg = dist.msg;
-            }
-            _ => {}
+        if buf[0] == 112 {
+            let dist = Dist::try_from(&buf[..length]).map_err(Error::from)?;
+            handler =
+                Self::handle_ctrl(dist.ctrl_msg.clone(), dist.msg.clone(), handler, &mut node)
+                    .await?;
         }
 
         Ok((false, stream, buf, node, handler))
@@ -418,92 +414,42 @@ impl Session {
         match ctrl {
             CtrlMsg::RegSend(ctrl) => handler.reg_send(node, ctrl, msg.unwrap()).await,
             CtrlMsg::AliasSend(ctrl) => handler.alias_send(node, ctrl, msg.unwrap()).await,
-
-            //CtrlMsg::AliasSendTT(ctrl) => {
-            //    self.handler = self.handler.alias_send_tt(&mut self.node_premitive, ctrl, msg.unwrap()).await?;
-            //},
-            //CtrlMsg::MonitorP(ctrl) => {
-            //    self.handler = self.handler.mointor_p(&mut self.node_premitive, ctrl).await?;
-            //},
-            //CtrlMsg::DeMonitorP(ctrl) => {
-            //    self.handler = self.handler.de_monitor_p(&mut self.node_premitive, ctrl).await?;
-            //},
-            //CtrlMsg::MonitorPExit(ctrl) => {
-            //    self.handler = self.handler.monitor_p_exit(&mut self.node_premitive, ctrl).await?;
-            //},
-            //CtrlMsg::Exit(ctrl) => {
-            //    self.handler = self.handler.exit(&mut self.node_premitive, ctrl).await?;
-            //},
-            //CtrlMsg::ExitTT(ctrl) => {
-            //    self.handler = self.handler.exit_tt(&mut self.node_premitive, ctrl).await?;
-            //},
-            //CtrlMsg::Exit2(ctrl) => {
-            //    self.handler = self.handler.exit2(&mut self.node_premitive, ctrl).await?;
-            //},
-            //CtrlMsg::Exit2TT(ctrl) => {
-            //    self.handler = self.handler.exit2_tt(&mut self.node_premitive, ctrl).await?;
-            //},
-            //CtrlMsg::GroupLeader(ctrl) => {
-            //    self.handler = self.handler.group_leader(&mut self.node_premitive, ctrl).await?;
-            //},
-            //CtrlMsg::Link(ctrl) => {
-            //    self.handler = self.handler.link(&mut self.node_premitive, ctrl).await?;
-            //},
-            //CtrlMsg::NodeLink(ctrl) => {
-            //    self.handler = self.handler.node_link(&mut self.node_premitive, ctrl).await?;
-            //},
-            //CtrlMsg::PayloadExit(ctrl) => {
-            //    self.handler = self.handler.payload_exit(&mut self.node_premitive, ctrl, msg.unwrap()).await?;
-            //},
-            //CtrlMsg::PayloadExitTT(ctrl) => {
-            //    self.handler = self.handler.payload_exit_tt(&mut self.node_premitive, ctrl, msg.unwrap()).await?;
-            //},
-            //CtrlMsg::PayloadExit2(ctrl) => {
-            //    self.handler = self.handler.payload_exit2(&mut self.node_premitive, ctrl, msg.unwrap()).await?;
-            //},
-            //CtrlMsg::PayloadExit2TT(ctrl) => {
-            //    self.handler = self.handler.payload_exit2_tt(&mut self.node_premitive, ctrl, msg.unwrap()).await?;
-            //},
-            //CtrlMsg::PayloadMonitorPExit(ctrl) => {
-            //    self.handler = self.handler.payload_monitor_p_exit(&mut self.node_premitive, ctrl, msg.unwrap()).await?;
-            //},
-            //CtrlMsg::SendCtrl(ctrl) => {
-            //    self.handler = self.handler.send(&mut self.node_premitive, ctrl, msg.unwrap()).await?;
-            //},
-            //CtrlMsg::UnLink(ctrl) => {
-            //    self.handler = self.handler.unlink(&mut self.node_premitive, ctrl).await?;
-            //},
-            //CtrlMsg::SendTT(ctrl) => {
-            //    self.handler = self.handler.send_tt(&mut self.node_premitive, ctrl, msg.unwrap()).await?;
-            //},
-            //CtrlMsg::RegSendTT(ctrl) => {
-            //    self.handler = self.handler.reg_send_tt(&mut self.node_premitive, ctrl, msg.unwrap()).await?;
-            //},
-            CtrlMsg::SendSender(ctrl) => handler.send_sender(node, ctrl, msg.unwrap()).await,
-            //CtrlMsg::SendSenderTT(ctrl) => {
-            //    self.handler = self.handler.send_sender_tt(&mut self.node_premitive, ctrl, msg.unwrap()).await?;
-            //},
-            //CtrlMsg::SpawnRequest(ctrl) => {
-            //    self.handler = self.handler.spawn_request(&mut self.node_premitive, ctrl, msg.unwrap()).await?;
-            //},
-            //CtrlMsg::SpawnRequestTT(ctrl) => {
-            //    self.handler = self.handler.spawn_request_tt(&mut self.node_premitive, ctrl, msg.unwrap()).await?;
-            //},
-            //CtrlMsg::SpawnReply(ctrl) => {
-            //    self.handler = self.handler.spawn_reply(&mut self.node_premitive, ctrl).await?;
-            //},
-            //CtrlMsg::SpawnReplyTT(ctrl) => {
-            //    self.handler = self.handler.spawn_reply_tt(&mut self.node_premitive, ctrl).await?;
-            //},
-            //CtrlMsg::UnLinkId(ctrl) => {
-            //    self.handler = self.handler.unlink_id(&mut self.node_premitive, ctrl).await?;
-            //},
-            //CtrlMsg::UnLinkIdAck(ctrl) => {
-            //    self.handler = self.handler.unlink_id_ack(&mut self.node_premitive, ctrl).await?;
-            //},
-            _ => {
-                unreachable!()
+            CtrlMsg::AliasSendTT(ctrl) => handler.alias_send_tt(node, ctrl, msg.unwrap()).await,
+            CtrlMsg::MonitorP(ctrl) => handler.mointor_p(node, ctrl).await,
+            CtrlMsg::DeMonitorP(ctrl) => handler.de_monitor_p(node, ctrl).await,
+            CtrlMsg::MonitorPExit(ctrl) => handler.monitor_p_exit(node, ctrl).await,
+            CtrlMsg::Exit(ctrl) => handler.exit(node, ctrl).await,
+            CtrlMsg::ExitTT(ctrl) => handler.exit_tt(node, ctrl).await,
+            CtrlMsg::Exit2(ctrl) => handler.exit2(node, ctrl).await,
+            CtrlMsg::Exit2TT(ctrl) => handler.exit2_tt(node, ctrl).await,
+            CtrlMsg::GroupLeader(ctrl) => handler.group_leader(node, ctrl).await,
+            CtrlMsg::Link(ctrl) => handler.link(node, ctrl).await,
+            CtrlMsg::NodeLink(ctrl) => handler.node_link(node, ctrl).await,
+            CtrlMsg::PayloadExit(ctrl) => handler.payload_exit(node, ctrl, msg.unwrap()).await,
+            CtrlMsg::PayloadExitTT(ctrl) => handler.payload_exit_tt(node, ctrl, msg.unwrap()).await,
+            CtrlMsg::PayloadExit2(ctrl) => handler.payload_exit2(node, ctrl, msg.unwrap()).await,
+            CtrlMsg::PayloadExit2TT(ctrl) => {
+                handler.payload_exit2_tt(node, ctrl, msg.unwrap()).await
             }
+            CtrlMsg::PayloadMonitorPExit(ctrl) => {
+                handler
+                    .payload_monitor_p_exit(node, ctrl, msg.unwrap())
+                    .await
+            }
+            CtrlMsg::SendCtrl(ctrl) => handler.send(node, ctrl, msg.unwrap()).await,
+            CtrlMsg::UnLink(ctrl) => handler.unlink(node, ctrl).await,
+            CtrlMsg::SendTT(ctrl) => handler.send_tt(node, ctrl, msg.unwrap()).await,
+            CtrlMsg::RegSendTT(ctrl) => handler.reg_send_tt(node, ctrl, msg.unwrap()).await,
+            CtrlMsg::SendSender(ctrl) => handler.send_sender(node, ctrl, msg.unwrap()).await,
+            CtrlMsg::SendSenderTT(ctrl) => handler.send_sender_tt(node, ctrl, msg.unwrap()).await,
+            CtrlMsg::SpawnRequest(ctrl) => handler.spawn_request(node, ctrl, msg.unwrap()).await,
+            CtrlMsg::SpawnRequestTT(ctrl) => {
+                handler.spawn_request_tt(node, ctrl, msg.unwrap()).await
+            }
+            CtrlMsg::SpawnReply(ctrl) => handler.spawn_reply(node, ctrl).await,
+            CtrlMsg::SpawnReplyTT(ctrl) => handler.spawn_reply_tt(node, ctrl).await,
+            CtrlMsg::UnLinkId(ctrl) => handler.unlink_id(node, ctrl).await,
+            CtrlMsg::UnLinkIdAck(ctrl) => handler.unlink_id_ack(node, ctrl).await,
         }
     }
 
