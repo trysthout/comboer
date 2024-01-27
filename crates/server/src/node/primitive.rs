@@ -1,12 +1,13 @@
 use std::{
     net::{Ipv4Addr, SocketAddrV4},
+    sync::atomic::{AtomicU64, Ordering},
     time::SystemTime,
 };
 
 use byteorder::{BigEndian, ByteOrder};
 
 use proto::{
-    etf::term::{self, NewPid},
+    etf::term::{self, NewPid, NewerReference},
     handshake::{HandshakeCodec, HandshakeVersion, Status},
     CtrlMsg, Dist, Encoder, EpmdClient, Len,
 };
@@ -244,7 +245,7 @@ impl NodeAsServer {
 
                                     let (internal_tx, internal_rx) = unbounded_channel::<(Dist, oneshot::Sender<()>)>();
                                     let node = NodePrimitive::new(node_name, creation, internal_tx);
-                                    if let Err(err) = Session::new(internal_rx).run(stream, handler, Some(node.clone())).await {
+                                    if let Err(err) = Session::new(internal_rx).run(stream, handler, Some(node)).await {
                                         let _ = error_tx.send(err.into());
                                     }
                                 }
@@ -540,6 +541,8 @@ fn read_length(header_length: usize, buf: &[u8]) -> usize {
     }
 }
 
+static UNIQ_ID: AtomicU64 = AtomicU64::new(1);
+static PID_ID: AtomicU64 = AtomicU64::new(1);
 #[derive(Debug, Clone)]
 pub struct NodePrimitive {
     node_name: String,
@@ -566,16 +569,28 @@ impl NodePrimitive {
         let _ = wait_rx.await;
     }
 
-    pub fn self_pid(&self) -> NewPid {
-        let id = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+    pub fn make_pid(&self) -> term::NewPid {
+        let pid_id = PID_ID.fetch_add(1, Ordering::Relaxed);
         term::NewPid {
             node: term::SmallAtomUtf8(self.node_name.clone()),
-            id: (id >> 32) as u32,
-            serial: id as u32,
+            id: (pid_id & 0x7fff) as u32,
+            serial: ((pid_id >> 15) & 0x1fff) as u32,
             creation: self.creation,
+        }
+    }
+
+    /// create ref. refer to https://github.com/erlang/otp/blob/master/lib/erl_interface/src/connect/ei_connect.c#L745
+    pub fn make_ref(&self) -> term::NewerReference {
+        let uniq_id = UNIQ_ID.fetch_add(1, Ordering::Relaxed);
+        term::NewerReference {
+            length: 3,
+            node: term::SmallAtomUtf8(self.node_name.clone()),
+            creation: self.creation,
+            id: vec![
+                (uniq_id & 0x3ffff) as u32,
+                ((uniq_id >> 18) & 0xffffffff) as u32,
+                ((uniq_id >> (18 + 32)) & 0xffffffff) as u32,
+            ],
         }
     }
 }
