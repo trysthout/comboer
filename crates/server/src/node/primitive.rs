@@ -7,9 +7,7 @@ use std::{
 use byteorder::{BigEndian, ByteOrder};
 
 use proto::{
-    etf::term::{self},
-    handshake::{HandshakeCodec, HandshakeVersion, Status},
-    CtrlMsg, Dist, Encoder, EpmdClient, Len,
+    etf::term::{self}, handshake::{HandshakeCodec, HandshakeVersion, Status}, Ctrl, CtrlMsg, Encoder, EpmdClient, Len
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -34,7 +32,7 @@ pub struct NodeAsClient {
     pub node_name: String,
     pub cookie: String,
     pub creation: u32,
-    internal_tx: Option<UnboundedSender<(Dist, oneshot::Sender<()>)>>,
+    internal_tx: Option<UnboundedSender<(CtrlMsg, oneshot::Sender<()>)>>,
 }
 
 impl NodeAsClient {
@@ -74,7 +72,7 @@ impl NodeAsClient {
         let _ = stream.set_nodelay(true);
         let handshake_codec = HandshakeCodec::new(self.node_name.clone(), self.cookie.clone());
         self.client_handshake(handshake_codec, &mut stream).await?;
-        let (internal_tx, internal_rx) = unbounded_channel::<(Dist, oneshot::Sender<()>)>();
+        let (internal_tx, internal_rx) = unbounded_channel::<(CtrlMsg, oneshot::Sender<()>)>();
         self.internal_tx = Some(internal_tx.clone());
         let node = NodePrimitive::new(self.node_name.clone(), self.creation, internal_tx);
         let (err_tx, err_rx) = oneshot::channel::<H::Error>();
@@ -155,7 +153,7 @@ impl NodeAsClient {
         }
     }
 
-    pub async fn send(&mut self, dist: Dist) -> Result<(), Error> {
+    pub async fn send(&mut self, dist: CtrlMsg) -> Result<(), Error> {
         let (wait_tx, wait_rx) = oneshot::channel::<()>();
         self.internal_tx
             .as_mut()
@@ -198,17 +196,24 @@ impl NodeAsServer {
         <S as AsServer>::Handler: Clone + Sync,
         <<S as AsServer>::Handler as Handler>::Error: Into<Error>,
     {
-        let listener = TcpListener::bind("0.0.0.0:0").await.map_err(Error::from)?;
-        let port = listener.local_addr().map_err(Error::from)?.port();
-        let mut epmd_client = EpmdClient::new(epmd_addr).await.map_err(Error::from)?;
-        let resp = epmd_client
-            .register_node(port, &self.node_name)
-            .await
-            .map_err(Error::from)?;
-        if resp.result != 0 {
-            return Err(Error::Anyhow(anyhow::anyhow!(
-                "Faild register node to epmd"
-            )));
+        let listener = TcpListener::bind("0.0.0.0:0").await?;
+        let port = listener.local_addr()?.port();
+        let mut epmd_client = EpmdClient::new(epmd_addr).await?;
+        let nodes = epmd_client.req_names().await?.nodes;
+        let is_exists = nodes
+            .iter()
+            .any(|n| n.name == self.node_name);
+
+        if !is_exists {
+            let resp = epmd_client
+                    .register_node(port, &self.node_name)
+                    .await?;
+
+            if resp.result != 0 {
+                return Err(Error::Anyhow(anyhow::anyhow!(
+                    "Faild register node to epmd"
+                )));
+            }
         }
 
         self.node_name.push('@');
@@ -243,7 +248,7 @@ impl NodeAsServer {
                                         }
                                     };
 
-                                    let (internal_tx, internal_rx) = unbounded_channel::<(Dist, oneshot::Sender<()>)>();
+                                    let (internal_tx, internal_rx) = unbounded_channel::<(CtrlMsg, oneshot::Sender<()>)>();
                                     let node = NodePrimitive::new(node_name, creation, internal_tx);
                                     if let Err(err) = Session::new(internal_rx).run(stream, handler, Some(node)).await {
                                         let _ = error_tx.send(err.into());
@@ -330,11 +335,11 @@ impl NodeAsServer {
 
 struct Session {
     // receive internal process message, send to outside
-    internal_rx: UnboundedReceiver<(Dist, oneshot::Sender<()>)>,
+    internal_rx: UnboundedReceiver<(CtrlMsg, oneshot::Sender<()>)>,
 }
 
 impl Session {
-    fn new(internal_rx: UnboundedReceiver<(Dist, oneshot::Sender<()>)>) -> Self {
+    fn new(internal_rx: UnboundedReceiver<(CtrlMsg, oneshot::Sender<()>)>) -> Self {
         Self { internal_rx }
     }
 
@@ -371,12 +376,12 @@ impl Session {
         }
     }
 
-    async fn handle_data<'a, H: Handler + Send>(
-        mut stream: ReadHalf<'a>,
+    async fn handle_data<H: Handler + Send>(
+        mut stream: ReadHalf<'_>,
         mut buf: Vec<u8>,
         mut handler: H,
         mut node: NodePrimitive,
-    ) -> Result<(bool, ReadHalf<'a>, Vec<u8>, NodePrimitive, H), H::Error> {
+    ) -> Result<(bool, ReadHalf<'_>, Vec<u8>, NodePrimitive, H), H::Error> {
         stream
             .read_exact(&mut buf[..4])
             .await
@@ -396,9 +401,9 @@ impl Session {
             .await
             .map_err(Error::from)?;
         if buf[0] == 112 {
-            let dist = Dist::try_from(&buf[..length]).map_err(Error::from)?;
+            let dist = CtrlMsg::try_from(&buf[..length]).map_err(Error::from)?;
             handler =
-                Self::handle_ctrl(dist.ctrl_msg.clone(), dist.msg.clone(), handler, &mut node)
+                Self::handle_ctrl(dist.ctrl.clone(), dist.msg.clone(), handler, &mut node)
                     .await?;
         }
 
@@ -406,56 +411,56 @@ impl Session {
     }
 
     async fn handle_ctrl<H: Handler + Send>(
-        ctrl: CtrlMsg,
+        ctrl: Ctrl,
         msg: Option<term::Term>,
         handler: H,
         node: &mut NodePrimitive,
     ) -> Result<H, H::Error> {
         match ctrl {
-            CtrlMsg::RegSend(ctrl) => handler.reg_send(node, ctrl, msg.unwrap()).await,
-            CtrlMsg::AliasSend(ctrl) => handler.alias_send(node, ctrl, msg.unwrap()).await,
-            CtrlMsg::AliasSendTT(ctrl) => handler.alias_send_tt(node, ctrl, msg.unwrap()).await,
-            CtrlMsg::MonitorP(ctrl) => handler.mointor_p(node, ctrl).await,
-            CtrlMsg::DeMonitorP(ctrl) => handler.de_monitor_p(node, ctrl).await,
-            CtrlMsg::MonitorPExit(ctrl) => handler.monitor_p_exit(node, ctrl).await,
-            CtrlMsg::Exit(ctrl) => handler.exit(node, ctrl).await,
-            CtrlMsg::ExitTT(ctrl) => handler.exit_tt(node, ctrl).await,
-            CtrlMsg::Exit2(ctrl) => handler.exit2(node, ctrl).await,
-            CtrlMsg::Exit2TT(ctrl) => handler.exit2_tt(node, ctrl).await,
-            CtrlMsg::GroupLeader(ctrl) => handler.group_leader(node, ctrl).await,
-            CtrlMsg::Link(ctrl) => handler.link(node, ctrl).await,
-            CtrlMsg::NodeLink(ctrl) => handler.node_link(node, ctrl).await,
-            CtrlMsg::PayloadExit(ctrl) => handler.payload_exit(node, ctrl, msg.unwrap()).await,
-            CtrlMsg::PayloadExitTT(ctrl) => handler.payload_exit_tt(node, ctrl, msg.unwrap()).await,
-            CtrlMsg::PayloadExit2(ctrl) => handler.payload_exit2(node, ctrl, msg.unwrap()).await,
-            CtrlMsg::PayloadExit2TT(ctrl) => {
+            Ctrl::RegSend(ctrl) => handler.reg_send(node, ctrl, msg.unwrap()).await,
+            Ctrl::AliasSend(ctrl) => handler.alias_send(node, ctrl, msg.unwrap()).await,
+            Ctrl::AliasSendTT(ctrl) => handler.alias_send_tt(node, ctrl, msg.unwrap()).await,
+            Ctrl::MonitorP(ctrl) => handler.mointor_p(node, ctrl).await,
+            Ctrl::DeMonitorP(ctrl) => handler.de_monitor_p(node, ctrl).await,
+            Ctrl::MonitorPExit(ctrl) => handler.monitor_p_exit(node, ctrl).await,
+            Ctrl::Exit(ctrl) => handler.exit(node, ctrl).await,
+            Ctrl::ExitTT(ctrl) => handler.exit_tt(node, ctrl).await,
+            Ctrl::Exit2(ctrl) => handler.exit2(node, ctrl).await,
+            Ctrl::Exit2TT(ctrl) => handler.exit2_tt(node, ctrl).await,
+            Ctrl::GroupLeader(ctrl) => handler.group_leader(node, ctrl).await,
+            Ctrl::Link(ctrl) => handler.link(node, ctrl).await,
+            Ctrl::NodeLink(ctrl) => handler.node_link(node, ctrl).await,
+            Ctrl::PayloadExit(ctrl) => handler.payload_exit(node, ctrl, msg.unwrap()).await,
+            Ctrl::PayloadExitTT(ctrl) => handler.payload_exit_tt(node, ctrl, msg.unwrap()).await,
+            Ctrl::PayloadExit2(ctrl) => handler.payload_exit2(node, ctrl, msg.unwrap()).await,
+            Ctrl::PayloadExit2TT(ctrl) => {
                 handler.payload_exit2_tt(node, ctrl, msg.unwrap()).await
             }
-            CtrlMsg::PayloadMonitorPExit(ctrl) => {
+            Ctrl::PayloadMonitorPExit(ctrl) => {
                 handler
                     .payload_monitor_p_exit(node, ctrl, msg.unwrap())
                     .await
             }
-            CtrlMsg::SendCtrl(ctrl) => handler.send(node, ctrl, msg.unwrap()).await,
-            CtrlMsg::UnLink(ctrl) => handler.unlink(node, ctrl).await,
-            CtrlMsg::SendTT(ctrl) => handler.send_tt(node, ctrl, msg.unwrap()).await,
-            CtrlMsg::RegSendTT(ctrl) => handler.reg_send_tt(node, ctrl, msg.unwrap()).await,
-            CtrlMsg::SendSender(ctrl) => handler.send_sender(node, ctrl, msg.unwrap()).await,
-            CtrlMsg::SendSenderTT(ctrl) => handler.send_sender_tt(node, ctrl, msg.unwrap()).await,
-            CtrlMsg::SpawnRequest(ctrl) => handler.spawn_request(node, ctrl, msg.unwrap()).await,
-            CtrlMsg::SpawnRequestTT(ctrl) => {
+            Ctrl::SendCtrl(ctrl) => handler.send(node, ctrl, msg.unwrap()).await,
+            Ctrl::UnLink(ctrl) => handler.unlink(node, ctrl).await,
+            Ctrl::SendTT(ctrl) => handler.send_tt(node, ctrl, msg.unwrap()).await,
+            Ctrl::RegSendTT(ctrl) => handler.reg_send_tt(node, ctrl, msg.unwrap()).await,
+            Ctrl::SendSender(ctrl) => handler.send_sender(node, ctrl, msg.unwrap()).await,
+            Ctrl::SendSenderTT(ctrl) => handler.send_sender_tt(node, ctrl, msg.unwrap()).await,
+            Ctrl::SpawnRequest(ctrl) => handler.spawn_request(node, ctrl, msg.unwrap()).await,
+            Ctrl::SpawnRequestTT(ctrl) => {
                 handler.spawn_request_tt(node, ctrl, msg.unwrap()).await
             }
-            CtrlMsg::SpawnReply(ctrl) => handler.spawn_reply(node, ctrl).await,
-            CtrlMsg::SpawnReplyTT(ctrl) => handler.spawn_reply_tt(node, ctrl).await,
-            CtrlMsg::UnLinkId(ctrl) => handler.unlink_id(node, ctrl).await,
-            CtrlMsg::UnLinkIdAck(ctrl) => handler.unlink_id_ack(node, ctrl).await,
+            Ctrl::SpawnReply(ctrl) => handler.spawn_reply(node, ctrl).await,
+            Ctrl::SpawnReplyTT(ctrl) => handler.spawn_reply_tt(node, ctrl).await,
+            Ctrl::UnLinkId(ctrl) => handler.unlink_id(node, ctrl).await,
+            Ctrl::UnLinkIdAck(ctrl) => handler.unlink_id_ack(node, ctrl).await,
         }
     }
 
     async fn send_to_outside(
         &self,
-        msg: Option<(Dist, oneshot::Sender<()>)>,
+        msg: Option<(CtrlMsg, oneshot::Sender<()>)>,
         stream: &mut WriteHalf<'_>,
     ) -> Result<(), Error> {
         if let Some((msg, wait_tx)) = msg {
@@ -493,14 +498,14 @@ static PID_ID: AtomicU64 = AtomicU64::new(1);
 pub struct NodePrimitive {
     node_name: String,
     creation: u32,
-    sender: UnboundedSender<(Dist, oneshot::Sender<()>)>,
+    sender: UnboundedSender<(CtrlMsg, oneshot::Sender<()>)>,
 }
 
 impl NodePrimitive {
     pub fn new(
         node_name: String,
         creation: u32,
-        sender: UnboundedSender<(Dist, oneshot::Sender<()>)>,
+        sender: UnboundedSender<(CtrlMsg, oneshot::Sender<()>)>,
     ) -> Self {
         Self {
             node_name: node_name.clone(),
@@ -509,7 +514,7 @@ impl NodePrimitive {
         }
     }
 
-    pub async fn send(&self, dist: Dist) {
+    pub async fn send(&self, dist: CtrlMsg) {
         let (wait_tx, wait_rx) = oneshot::channel::<()>();
         let _ = self.sender.send((dist, wait_tx));
         let _ = wait_rx.await;

@@ -198,29 +198,27 @@ impl EpmdServer {
 
     async fn handle_connection(&mut self, mut stream: TcpStream) -> Result<(), anyhow::Error> {
         let mut buf = vec![0; 512];
-        loop {
-            stream.read_exact(&mut buf[..2]).await?;
-            let length = BigEndian::read_u16(&buf[..2]) as usize;
-            if length > buf.len() {
-                buf.resize(length, 0)
+        stream.read_exact(&mut buf[..2]).await?;
+        let length = BigEndian::read_u16(&buf[..2]) as usize;
+        if length > buf.len() {
+            buf.resize(length, 0)
+        }
+        stream.read_exact(&mut buf[..length]).await?;
+        match buf[0] {
+            ALIVE2_REQ => {
+                self.decode_alive_req(&buf);
+                let n = self.encode_alive_x_resp(&mut buf[0..]);
+                stream.write_all(&buf[..n]).await?;
+                Ok(())
             }
-            stream.read_exact(&mut buf[..length]).await?;
-            match buf[0] {
-                ALIVE2_REQ => {
-                    self.decode_alive_req(&buf);
-                    let n = self.encode_alive_x_resp(&mut buf[0..]);
-                    stream.write_all(&buf[..n]).await?;
-                    return Ok(());
-                }
 
-                NAMES_REQ => {
-                    let n = self.encode_names_resp(&mut buf[0..]);
-                    stream.write_all(&buf[..n]).await?;
-                    return Ok(());
-                }
-
-                x => return Err(anyhow::anyhow!("Unsupported tag, got: {}", x)),
+            NAMES_REQ => {
+                let n = self.encode_names_resp(&mut buf[0..]);
+                stream.write_all(&buf[..n]).await?;
+                Ok(())
             }
+
+            x => Err(anyhow::anyhow!("Unsupported tag, got: {}", x)),
         }
     }
 

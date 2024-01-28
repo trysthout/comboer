@@ -1,4 +1,4 @@
-use proto::{etf::term, Dist, RegSend, SendCtrl, SendSender};
+use proto::{etf::term, CtrlMsg, RegSend, SendCtrl, SendSender};
 use server::{AsServer, Handler, NodeAsServer, NodePrimitive};
 
 #[derive(Debug, Clone)]
@@ -31,8 +31,8 @@ impl Handler for A {
                 };
 
                 let msg = term::SmallAtomUtf8("ccccccccccccccccc".to_string());
-                let dist = Dist {
-                    ctrl_msg: reg.into(),
+                let dist = CtrlMsg {
+                    ctrl: reg.into(),
                     msg: Some(msg.into()),
                 };
 
@@ -57,8 +57,8 @@ impl Handler for A {
             unused: term::SmallAtomUtf8("".to_string()),
             to: from,
         };
-        let dist = Dist {
-            ctrl_msg: ctrl.clone().into(),
+        let dist = CtrlMsg {
+            ctrl: ctrl.clone().into(),
             msg: Some(
                 term::SmallTuple {
                     arity: 2,

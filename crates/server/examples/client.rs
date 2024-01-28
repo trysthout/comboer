@@ -1,6 +1,6 @@
 use proto::etf::term::Term;
 use proto::{etf::term, RegSend, SendCtrl};
-use proto::{Dist, SendSender};
+use proto::{CtrlMsg, SendSender};
 use server::{NodeAsClient, NodePrimitive};
 use tokio::sync::mpsc;
 
@@ -28,8 +28,8 @@ impl server::Handler for A {
                 };
 
                 let msg = term::SmallAtomUtf8("ccccccccccccccccc".to_string());
-                let dist = Dist {
-                    ctrl_msg: reg.into(),
+                let dist = CtrlMsg {
+                    ctrl: reg.into(),
                     msg: Some(msg.into()),
                 };
 
@@ -54,8 +54,8 @@ impl server::Handler for A {
             unused: term::SmallAtomUtf8("".to_string()),
             to: from,
         };
-        let dist = Dist {
-            ctrl_msg: ctrl.clone().into(),
+        let dist = CtrlMsg {
+            ctrl: ctrl.clone().into(),
             msg: Some(
                 term::SmallTuple {
                     arity: 2,
@@ -107,7 +107,7 @@ async fn main() -> Result<(), anyhow::Error> {
     }
     .into();
 
-    let _ = client.0.send(Dist::new(ctrl, Some(msg))).await;
+    let _ = client.0.send(CtrlMsg::new(ctrl, Some(msg))).await;
 
     let _ = shutdown_rx.recv().await;
 

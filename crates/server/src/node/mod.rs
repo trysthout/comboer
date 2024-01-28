@@ -1,6 +1,5 @@
 use async_trait::async_trait;
-use proto::dist::*;
-use proto::{etf::term, RegSend, SendCtrl};
+use proto::*;
 use tokio::net::ToSocketAddrs;
 
 pub mod primitive;
@@ -248,7 +247,7 @@ pub enum Error {
     #[error(transparent)]
     ChannelTryRecv(#[from] TryRecvError),
     #[error(transparent)]
-    ChannelSendError(#[from] SendError<(Dist, oneshot::Sender<()>)>),
+    ChannelSendError(#[from] SendError<(CtrlMsg, oneshot::Sender<()>)>),
 
     #[error(transparent)]
     IO(#[from] std::io::Error),

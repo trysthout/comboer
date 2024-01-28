@@ -2,6 +2,7 @@ pub mod dist;
 pub use dist::*;
 
 pub mod etf;
+pub use etf::*;
 
 pub trait Encoder {
     type Error;

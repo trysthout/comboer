@@ -1,4 +1,5 @@
 use bitflags::bitflags;
+use crate::etf::term::NewPid;
 
 bitflags! {
     #[derive(Debug, Clone)]
@@ -102,10 +103,10 @@ pub trait ProcessKind {
     fn get_to_pid_atom(&self) -> NewPid;
 }
 
-pub mod dist;
-pub use dist::*;
+pub mod ctrl;
+pub use ctrl::*;
 pub mod epmd;
 pub use epmd::*;
 
-use crate::etf::term::NewPid;
+
 pub mod handshake;

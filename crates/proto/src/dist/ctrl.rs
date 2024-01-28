@@ -2,7 +2,7 @@ use bytes::Buf;
 
 use crate::{dist::OpCode, etf::term::*, Encoder, Len};
 
-macro_rules! ctrl_msg {
+macro_rules! define_ctrl {
     (
         $(#[$outer:meta])*
         $sn:ident { $($f:ident:$ft:ty),* }, $op:expr, $num:expr) => {
@@ -65,7 +65,7 @@ macro_rules! ctrl_msg {
     };
 }
 
-ctrl_msg!(
+define_ctrl!(
     #[doc = "
 {1, FromPid, ToPid}
 This signal is sent by FromPid in order to create a link between FromPid and ToPid.
@@ -78,7 +78,7 @@ This signal is sent by FromPid in order to create a link between FromPid and ToP
     3
 );
 
-ctrl_msg!(
+define_ctrl!(
     #[doc = "
  SEND
  {2, Unused, ToPid}
@@ -93,7 +93,7 @@ ctrl_msg!(
     3
 );
 
-ctrl_msg!(
+define_ctrl!(
     #[doc = "
  EXIT
  {3, FromPid, ToPid, Reason}
@@ -108,7 +108,7 @@ ctrl_msg!(
     4
 );
 
-ctrl_msg!(
+define_ctrl!(
     #[doc = "
  UNLINK (obsolete)
  {4, FromPid, ToPid}
@@ -121,7 +121,7 @@ ctrl_msg!(
     3
 );
 
-ctrl_msg!(
+define_ctrl!(
     #[doc = "
 NODE_LINK
 {5}
@@ -131,7 +131,7 @@ NODE_LINK
     1
 );
 
-ctrl_msg!(
+define_ctrl!(
     #[doc = "
 REG_SEND
 {6, FromPid, Unused, ToName}
@@ -147,7 +147,7 @@ Unused is kept for backward compatibility.
     4
 );
 
-ctrl_msg!(
+define_ctrl!(
     #[doc = "
 GROUP_LEADER
 {7, FromPid, ToPid}
@@ -160,7 +160,7 @@ GROUP_LEADER
     3
 );
 
-ctrl_msg!(
+define_ctrl!(
     #[doc = "
 EXIT2
 {8, FromPid, ToPid, Reason}
@@ -174,7 +174,7 @@ EXIT2
     4
 );
 
-ctrl_msg!(
+define_ctrl!(
     #[doc = "
 SEND_TT
 {12, Unused, ToPid, TraceToken}
@@ -190,7 +190,7 @@ Unused is kept for backward compatibility.
     4
 );
 
-ctrl_msg!(
+define_ctrl!(
     #[doc = "
 // EXIT_TT
 // {13, FromPid, ToPid, TraceToken, Reason}
@@ -205,7 +205,7 @@ ctrl_msg!(
     5
 );
 
-ctrl_msg!(
+define_ctrl!(
     #[doc = "
 REG_SEND_TT
 {16, FromPid, Unused, ToName, TraceToken}
@@ -224,7 +224,7 @@ Unused is kept for backward compatibility.
     5
 );
 
-ctrl_msg!(
+define_ctrl!(
     #[doc = "
 EXIT2_TT
 {18, FromPid, ToPid, TraceToken, Reason}
@@ -240,7 +240,7 @@ EXIT2_TT
 );
 
 //
-ctrl_msg!(
+define_ctrl!(
     #[doc = "
 MONITOR_P
 {19, FromPid, ToProc, Ref}, where FromPid = monitoring process and ToProc = monitored process pid or name (atom)
@@ -254,7 +254,7 @@ MONITOR_P
     4
 );
 
-ctrl_msg!(
+define_ctrl!(
     #[doc = "
 DEMONITOR_P
 {20, FromPid, ToProc, Ref}, where FromPid = monitoring process and ToProc = monitored process pid or name (atom)
@@ -270,7 +270,7 @@ We include FromPid just in case we want to trace this.
     4
 );
 
-ctrl_msg!(
+define_ctrl!(
     #[doc = "
 MONITOR_P_EXIT
 {21, FromProc, ToPid, Ref, Reason}, where FromProc = monitored process pid or name (atom), ToPid = monitoring process, and Reason = exit reason for the monitored process
@@ -288,7 +288,7 @@ MONITOR_P_EXIT
 //
 
 //
-ctrl_msg!(
+define_ctrl!(
     #[doc = "
 SEND_SENDER
 {22, FromPid, ToPid}
@@ -307,7 +307,7 @@ This control message replaces the SEND control message and will be sent when the
 //
 
 //
-ctrl_msg!(
+define_ctrl!(
     #[doc = "
 SEND_SENDER_TT
 {23, FromPid, ToPid, TraceToken}
@@ -324,7 +324,7 @@ This control message replaces the SEND_TT control message and will be sent when 
 );
 
 //
-ctrl_msg!(
+define_ctrl!(
     #[doc = "
 PAYLOAD_EXIT
 {24, FromPid, ToPid}
@@ -342,7 +342,7 @@ This control message replaces the EXIT control message and will be sent when the
 );
 
 //
-ctrl_msg!(
+define_ctrl!(
     #[doc = "
 PAYLOAD_EXIT_TT
 {25, FromPid, ToPid, TraceToken}
@@ -360,7 +360,7 @@ This control message replaces the EXIT_TT control message and will be sent when 
     4
 );
 
-ctrl_msg!(
+define_ctrl!(
     #[doc = "
 PAYLOAD_EXIT2
 {26, FromPid, ToPid}
@@ -378,7 +378,7 @@ This control message replaces the EXIT2 control message and will be sent when th
 );
 
 //
-ctrl_msg!(
+define_ctrl!(
     #[doc = "
 PAYLOAD_EXIT2_TT
 {27, FromPid, ToPid, TraceToken}
@@ -396,7 +396,7 @@ This control message replaces the EXIT2_TT control message and will be sent when
     4
 );
 
-ctrl_msg!(
+define_ctrl!(
     #[doc = "
 PAYLOAD_MONITOR_P_EXIT
 {28, FromProc, ToPid, Ref}
@@ -456,7 +456,7 @@ impl Len for MFA {
     }
 }
 
-ctrl_msg!(
+define_ctrl!(
     #[doc = "
 SPAWN_REQUEST
 {29, ReqId, From, GroupLeader, {Module, Function, Arity}, OptList}
@@ -496,7 +496,7 @@ Only supported when the DFLAG_SPAWN distribution flag has been passed.
     6
 );
 
-ctrl_msg!(
+define_ctrl!(
     #[doc = "
 SPAWN_REQUEST_TT
 {30, ReqId, From, GroupLeader, {Module, Function, Arity}, OptList, Token}
@@ -519,7 +519,7 @@ Only supported when the DFLAG_SPAWN distribution flag has been passed.
     7
 );
 
-ctrl_msg!(
+define_ctrl!(
     #[doc = "
 SPAWN_REPLY
 {31, ReqId, To, Flags, Result}
@@ -556,7 +556,7 @@ Only supported when the DFLAG_SPAWN distribution flag has been passed.
     5
 );
 
-ctrl_msg!(
+define_ctrl!(
     #[doc = "
 SPAWN_REPLY_TT
 {32, ReqId, To, Flags, Result, Token}
@@ -576,7 +576,7 @@ Only supported when the DFLAG_SPAWN distribution flag has been passed.
     6
 );
 
-ctrl_msg!(
+define_ctrl!(
     #[doc = "
 UNLINK_ID
 {35, Id, FromPid, ToPid}
@@ -597,7 +597,7 @@ This signal is part of the new link protocol which became mandatory as of OTP 26
     4
 );
 
-ctrl_msg!(
+define_ctrl!(
     #[doc = "
 UNLINK_ID_ACK
 {36, Id, FromPid, ToPid}
@@ -617,7 +617,7 @@ This signal is part of the new link protocol which became mandatory as of OTP 26
     4
 );
 
-ctrl_msg!(
+define_ctrl!(
     #[doc = "
 New Ctrlmessages for Erlang/OTP 24
 ALIAS_SEND
@@ -636,7 +636,7 @@ Nodes that can handle this control message sets the distribution flag DFLAG_ALIA
     3
 );
 
-ctrl_msg!(
+define_ctrl!(
     #[doc = "
 ALIAS_SEND_TT
 {34, FromPid, Alias, Token}
@@ -655,21 +655,21 @@ Same as ALIAS_SEND, but also with a sequential trace Token
     4
 );
 
-macro_rules! impl_ctrl_msg {
+macro_rules! impl_ctrl {
     ($($t:ident),+) => {
         #[derive(Debug, Clone)]
-        pub enum CtrlMsg {
+        pub enum Ctrl {
             $($t($t),)+
         }
 
         $(
-            impl From<$t> for CtrlMsg {
+            impl From<$t> for Ctrl {
                 fn from(value: $t) -> Self {
                     Self::$t(value)
                 }
             }
 
-            impl From<&$t> for CtrlMsg {
+            impl From<&$t> for Ctrl {
                 fn from(value: &$t) -> Self {
                     Self::$t(value.clone())
                 }
@@ -677,10 +677,10 @@ macro_rules! impl_ctrl_msg {
         )+
 
         $(
-            impl TryFrom<CtrlMsg> for $t {
+            impl TryFrom<Ctrl> for $t {
                 type Error = anyhow::Error;
-                fn try_from(value: CtrlMsg) -> Result<Self, Self::Error> {
-                    if let CtrlMsg::$t(v) = value {
+                fn try_from(value: Ctrl) -> Result<Self, Self::Error> {
+                    if let Ctrl::$t(v) = value {
                         Ok(v)
                     } else {
                         Err(anyhow::anyhow!("cannot convert value type"))
@@ -689,7 +689,7 @@ macro_rules! impl_ctrl_msg {
             }
         )+
 
-        impl Encoder for CtrlMsg {
+        impl Encoder for Ctrl {
             type Error = anyhow::Error;
            fn encode<W: std::io::Write>(&self, w: &mut W) -> Result<(), Self::Error> {
                 match self {
@@ -700,7 +700,7 @@ macro_rules! impl_ctrl_msg {
            }
         }
 
-        impl TryFrom<&[u8]> for CtrlMsg {
+        impl TryFrom<&[u8]> for Ctrl {
             type Error = anyhow::Error;
             fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
                 match value[3] {
@@ -710,7 +710,7 @@ macro_rules! impl_ctrl_msg {
             }
         }
 
-        impl Len for CtrlMsg {
+        impl Len for Ctrl {
             fn len(&self) -> usize {
                 match self {
                     $(
@@ -722,7 +722,7 @@ macro_rules! impl_ctrl_msg {
     }
 }
 
-impl_ctrl_msg!(
+impl_ctrl!(
     Link,
     SendCtrl,
     Exit,
@@ -755,97 +755,97 @@ impl_ctrl_msg!(
     AliasSendTT
 );
 
-impl CtrlMsg {
+impl Ctrl {
     pub fn get_from_pid_atom(&self) -> Option<PidOrAtom> {
         match self {
-            CtrlMsg::AliasSend(v) => Some((&v.from).into()),
-            CtrlMsg::AliasSendTT(v) => Some((&v.from).into()),
-            CtrlMsg::Link(v) => Some((&v.from).into()),
-            CtrlMsg::SendCtrl(_) => None,
-            CtrlMsg::Exit(v) => Some((&v.from).into()),
-            CtrlMsg::UnLink(v) => Some((&v.from).into()),
-            CtrlMsg::NodeLink(_) => None,
-            CtrlMsg::RegSend(v) => Some((&v.from).into()),
-            CtrlMsg::GroupLeader(v) => Some((&v.from).into()),
-            CtrlMsg::Exit2(v) => Some((&v.from).into()),
-            CtrlMsg::SendTT(_) => None,
-            CtrlMsg::ExitTT(v) => Some((&v.from).into()),
-            CtrlMsg::RegSendTT(v) => Some((&v.from).into()),
-            CtrlMsg::Exit2TT(v) => Some((&v.from).into()),
-            CtrlMsg::MonitorP(v) => Some((&v.from).into()),
-            CtrlMsg::DeMonitorP(v) => Some((&v.from).into()),
-            CtrlMsg::MonitorPExit(v) => Some(v.from_proc.clone()),
-            CtrlMsg::SendSender(v) => Some((&v.from).into()),
-            CtrlMsg::SendSenderTT(v) => Some((&v.from).into()),
-            CtrlMsg::PayloadExit(v) => Some((&v.from).into()),
-            CtrlMsg::PayloadExitTT(v) => Some((&v.from).into()),
-            CtrlMsg::PayloadExit2(v) => Some((&v.from).into()),
-            CtrlMsg::PayloadExit2TT(v) => Some((&v.from).into()),
-            CtrlMsg::PayloadMonitorPExit(v) => Some(v.from_proc.clone()),
-            CtrlMsg::SpawnRequest(v) => Some((&v.from).into()),
-            CtrlMsg::SpawnRequestTT(v) => Some((&v.from).into()),
-            CtrlMsg::SpawnReply(_) => None,
-            CtrlMsg::SpawnReplyTT(_) => None,
-            CtrlMsg::UnLinkId(v) => Some((&v.from).into()),
-            CtrlMsg::UnLinkIdAck(v) => Some((&v.from).into()),
+            Self::AliasSend(v) => Some((&v.from).into()),
+            Self::AliasSendTT(v) => Some((&v.from).into()),
+            Self::Link(v) => Some((&v.from).into()),
+            Self::SendCtrl(_) => None,
+            Self::Exit(v) => Some((&v.from).into()),
+            Self::UnLink(v) => Some((&v.from).into()),
+            Self::NodeLink(_) => None,
+            Self::RegSend(v) => Some((&v.from).into()),
+            Self::GroupLeader(v) => Some((&v.from).into()),
+            Self::Exit2(v) => Some((&v.from).into()),
+            Self::SendTT(_) => None,
+            Self::ExitTT(v) => Some((&v.from).into()),
+            Self::RegSendTT(v) => Some((&v.from).into()),
+            Self::Exit2TT(v) => Some((&v.from).into()),
+            Self::MonitorP(v) => Some((&v.from).into()),
+            Self::DeMonitorP(v) => Some((&v.from).into()),
+            Self::MonitorPExit(v) => Some(v.from_proc.clone()),
+            Self::SendSender(v) => Some((&v.from).into()),
+            Self::SendSenderTT(v) => Some((&v.from).into()),
+            Self::PayloadExit(v) => Some((&v.from).into()),
+            Self::PayloadExitTT(v) => Some((&v.from).into()),
+            Self::PayloadExit2(v) => Some((&v.from).into()),
+            Self::PayloadExit2TT(v) => Some((&v.from).into()),
+            Self::PayloadMonitorPExit(v) => Some(v.from_proc.clone()),
+            Self::SpawnRequest(v) => Some((&v.from).into()),
+            Self::SpawnRequestTT(v) => Some((&v.from).into()),
+            Self::SpawnReply(_) => None,
+            Self::SpawnReplyTT(_) => None,
+            Self::UnLinkId(v) => Some((&v.from).into()),
+            Self::UnLinkIdAck(v) => Some((&v.from).into()),
         }
     }
 
     pub fn get_to_pid_atom(&self) -> Option<PidOrAtom> {
         match self {
-            CtrlMsg::AliasSend(v) => Some((&v.alias).into()),
-            CtrlMsg::AliasSendTT(v) => Some((&v.alias).into()),
-            CtrlMsg::Link(v) => Some((&v.to).into()),
-            CtrlMsg::SendCtrl(_) => None,
-            CtrlMsg::Exit(v) => Some((&v.to).into()),
-            CtrlMsg::UnLink(v) => Some((&v.to).into()),
-            CtrlMsg::NodeLink(_) => None,
-            CtrlMsg::RegSend(v) => Some((&v.to_name).into()),
-            CtrlMsg::GroupLeader(v) => Some((&v.to).into()),
-            CtrlMsg::Exit2(v) => Some((&v.to).into()),
-            CtrlMsg::SendTT(_) => None,
-            CtrlMsg::ExitTT(v) => Some((&v.to).into()),
-            CtrlMsg::RegSendTT(v) => Some((&v.to_name).into()),
-            CtrlMsg::Exit2TT(v) => Some((&v.to).into()),
-            CtrlMsg::MonitorP(v) => Some(v.to_proc.clone()),
-            CtrlMsg::DeMonitorP(v) => Some(v.to_proc.clone()),
-            CtrlMsg::MonitorPExit(v) => Some((&v.to).into()),
-            CtrlMsg::SendSender(v) => Some((&v.to).into()),
-            CtrlMsg::SendSenderTT(v) => Some((&v.to).into()),
-            CtrlMsg::PayloadExit(v) => Some((&v.to).into()),
-            CtrlMsg::PayloadExitTT(v) => Some((&v.to).into()),
-            CtrlMsg::PayloadExit2(v) => Some((&v.to).into()),
-            CtrlMsg::PayloadExit2TT(v) => Some((&v.to).into()),
-            CtrlMsg::PayloadMonitorPExit(v) => Some((&v.to).into()),
-            CtrlMsg::SpawnRequest(v) => Some((&v.group_leader).into()),
-            CtrlMsg::SpawnRequestTT(v) => Some((&v.group_leader).into()),
-            CtrlMsg::SpawnReply(_) => None,
-            CtrlMsg::SpawnReplyTT(_) => None,
-            CtrlMsg::UnLinkId(v) => Some((&v.to).into()),
-            CtrlMsg::UnLinkIdAck(v) => Some((&v.to).into()),
+            Self::AliasSend(v) => Some((&v.alias).into()),
+            Self::AliasSendTT(v) => Some((&v.alias).into()),
+            Self::Link(v) => Some((&v.to).into()),
+            Self::SendCtrl(_) => None,
+            Self::Exit(v) => Some((&v.to).into()),
+            Self::UnLink(v) => Some((&v.to).into()),
+            Self::NodeLink(_) => None,
+            Self::RegSend(v) => Some((&v.to_name).into()),
+            Self::GroupLeader(v) => Some((&v.to).into()),
+            Self::Exit2(v) => Some((&v.to).into()),
+            Self::SendTT(_) => None,
+            Self::ExitTT(v) => Some((&v.to).into()),
+            Self::RegSendTT(v) => Some((&v.to_name).into()),
+            Self::Exit2TT(v) => Some((&v.to).into()),
+            Self::MonitorP(v) => Some(v.to_proc.clone()),
+            Self::DeMonitorP(v) => Some(v.to_proc.clone()),
+            Self::MonitorPExit(v) => Some((&v.to).into()),
+            Self::SendSender(v) => Some((&v.to).into()),
+            Self::SendSenderTT(v) => Some((&v.to).into()),
+            Self::PayloadExit(v) => Some((&v.to).into()),
+            Self::PayloadExitTT(v) => Some((&v.to).into()),
+            Self::PayloadExit2(v) => Some((&v.to).into()),
+            Self::PayloadExit2TT(v) => Some((&v.to).into()),
+            Self::PayloadMonitorPExit(v) => Some((&v.to).into()),
+            Self::SpawnRequest(v) => Some((&v.group_leader).into()),
+            Self::SpawnRequestTT(v) => Some((&v.group_leader).into()),
+            Self::SpawnReply(_) => None,
+            Self::SpawnReplyTT(_) => None,
+            Self::UnLinkId(v) => Some((&v.to).into()),
+            Self::UnLinkIdAck(v) => Some((&v.to).into()),
         }
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct Dist {
-    pub ctrl_msg: CtrlMsg,
+pub struct CtrlMsg {
+    pub ctrl: Ctrl,
     pub msg: Option<Term>,
 }
 
-impl Dist {
-    pub fn new(ctrl_msg: CtrlMsg, msg: Option<Term>) -> Self {
-        Self { ctrl_msg, msg }
+impl CtrlMsg {
+    pub fn new(ctrl: Ctrl, msg: Option<Term>) -> Self {
+        Self { ctrl, msg }
     }
 }
 
-impl Encoder for Dist {
+impl Encoder for CtrlMsg {
     type Error = anyhow::Error;
     fn encode<W: std::io::Write>(&self, w: &mut W) -> Result<(), Self::Error> {
         w.write_all(&(self.len() as u32).to_be_bytes())?;
         w.write_all(&112_u8.to_be_bytes())?;
         w.write_all(&131_u8.to_be_bytes())?;
-        self.ctrl_msg.encode(w)?;
+        self.ctrl.encode(w)?;
         if let Some(term) = &self.msg {
             w.write_all(&131_u8.to_be_bytes())?;
             term.encode(w)?;
@@ -855,15 +855,15 @@ impl Encoder for Dist {
     }
 }
 
-impl TryFrom<&[u8]> for Dist {
+impl TryFrom<&[u8]> for CtrlMsg {
     type Error = anyhow::Error;
     fn try_from(mut value: &[u8]) -> Result<Self, Self::Error> {
         // 112
         value.get_u8();
         // 131
         value.get_u8();
-        let ctrl_msg = CtrlMsg::try_from(value)?;
-        value.advance(ctrl_msg.len());
+        let ctrl = Ctrl::try_from(value)?;
+        value.advance(ctrl.len());
         let msg = (!value.is_empty()).then(|| {
             // 131
             value.get_u8();
@@ -872,13 +872,13 @@ impl TryFrom<&[u8]> for Dist {
             term
         });
 
-        Ok(Self { ctrl_msg, msg })
+        Ok(Self { ctrl, msg })
     }
 }
 
-impl Len for Dist {
+impl Len for CtrlMsg {
     fn len(&self) -> usize {
-        2 + self.ctrl_msg.len() + 1 + self.msg.as_ref().map(|t| t.len()).unwrap_or_default()
+        2 + self.ctrl.len() + 1 + self.msg.as_ref().map(|t| t.len()).unwrap_or_default()
     }
 }
 
@@ -904,9 +904,9 @@ mod test {
             0, 116, 0, 0, 0, 0, 101, 136, 14, 0, 131, 104, 2, 119, 2, 104, 105, 88, 119, 8, 97, 64,
             102, 101, 100, 111, 114, 97, 0, 0, 0, 116, 0, 0, 0, 0, 101, 136, 14, 0,
         ];
-        let dist = Dist::try_from(&buf[..]).unwrap();
+        let dist = CtrlMsg::try_from(&buf[..]).unwrap();
         println!("dist {:?}", dist.len());
-        assert!(matches!(dist.ctrl_msg, CtrlMsg::SendCtrl(_)));
+        assert!(matches!(dist.ctrl, Ctrl::SendCtrl(_)));
         assert!(dist.msg.is_some());
         assert!(matches!(dist.msg.as_ref().unwrap(), Term::SmallTuple(_)));
         assert_eq!(dist.len(), 61);
