@@ -115,7 +115,7 @@ impl NodeAsClient {
             stream.read_exact(&mut buf[0..length]).await?;
             match buf[0] {
                 b's' => {
-                    handshake_codec.decode_status(&mut buf[..length]);
+                    handshake_codec.decode_status(&buf[..length]);
                     if handshake_codec.status == Status::NotAllowed
                         || handshake_codec.status == Status::Nok
                     {
@@ -125,12 +125,12 @@ impl NodeAsClient {
                     }
                 }
                 b'n' => {
-                    handshake_codec.decode_v5_challenge(&mut buf[..length]);
+                    handshake_codec.decode_v5_challenge(&buf[..length]);
                     let n = handshake_codec.encode_challenge_reply(&mut &mut buf[..]);
                     stream.write_all(&buf[..n]).await?;
                 }
                 b'N' => {
-                    handshake_codec.decode_v6_challenge(&mut buf[..length]);
+                    handshake_codec.decode_v6_challenge(&buf[..length]);
 
                     if handshake_codec.version == HandshakeVersion::V5 {
                         let n = handshake_codec.encode_complement(&mut &mut buf[..]);
@@ -141,7 +141,7 @@ impl NodeAsClient {
                     stream.write_all(&buf[..n]).await?;
                 }
                 b'a' => {
-                    let is_valid = handshake_codec.decode_challenge_ack(&mut buf[..length]);
+                    let is_valid = handshake_codec.decode_challenge_ack(&buf[..length]);
                     if !is_valid {
                         return Err(Error::HandshakeFailed("incorrect digest".to_string()));
                     }
@@ -289,7 +289,7 @@ impl NodeAsServer {
             stream.read_exact(&mut buf[0..length]).await?;
             match buf[0] {
                 b's' => {
-                    handshake_codec.decode_status(&mut buf[..length]);
+                    handshake_codec.decode_status(&buf[..length]);
                     if handshake_codec.status == Status::NotAllowed
                         || handshake_codec.status == Status::Nok
                     {
@@ -297,7 +297,7 @@ impl NodeAsServer {
                     }
                 }
                 b'n' => {
-                    handshake_codec.decode_v5_name(&mut buf[..length]);
+                    handshake_codec.decode_v5_name(&buf[..length]);
                     let n = handshake_codec.encode_status(&mut &mut buf[..]);
                     stream.write_all(&buf[..n]).await?;
                     let n = if handshake_codec.version == HandshakeVersion::V6 {
@@ -308,7 +308,7 @@ impl NodeAsServer {
                     stream.write_all(&buf[..n]).await?;
                 }
                 b'N' => {
-                    handshake_codec.decode_v6_name(&mut buf[..length]);
+                    handshake_codec.decode_v6_name(&buf[..length]);
                     let n = handshake_codec.encode_status(&mut &mut buf[..]);
                     stream.write_all(&buf[..n]).await?;
 
@@ -316,10 +316,10 @@ impl NodeAsServer {
                     stream.write_all(&buf[..n]).await?;
                 }
                 b'c' => {
-                    handshake_codec.decode_complement(&mut buf[..length]);
+                    handshake_codec.decode_complement(&buf[..length]);
                 }
                 b'r' => {
-                    if handshake_codec.decode_challenge_reply(&mut buf[..length]) {
+                    if handshake_codec.decode_challenge_reply(&buf[..length]) {
                         let n = handshake_codec.encode_challenge_ack(&mut &mut buf[..]);
                         stream.write_all(&buf[..n]).await?;
                         return Ok(());
