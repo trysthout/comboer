@@ -878,7 +878,7 @@ impl TryFrom<&[u8]> for CtrlMsg {
 
 impl Len for CtrlMsg {
     fn len(&self) -> usize {
-        2 + self.ctrl.len() + 1 + self.msg.as_ref().map(|t| t.len()).unwrap_or_default()
+        2 + self.ctrl.len() + self.msg.as_ref().map(|t| 1 + t.len()).unwrap_or_default()
     }
 }
 
@@ -916,10 +916,45 @@ mod test {
         assert_eq!(buf, expeted[4..]);
         println!("{:?}", buf);
         println!("{:?}", expeted);
+
+        let buf = vec![
+            112, 131, 104, 5, 97, 31, 90, 0, 3, 119, 8, 97, 64, 102, 101, 100, 111, 114, 97, 101, 175, 178, 25, 0, 3, 114, 239, 107, 28, 0, 1, 21, 162, 101, 84, 88, 119, 8, 97, 64, 102, 101, 100, 111, 114, 97, 0, 0, 0, 120, 0, 0, 0, 0, 101, 175, 178, 25, 97, 0, 88, 119, 11, 114, 117, 115, 116, 64, 102, 101, 100, 111, 114, 97, 0, 0, 0, 2, 0, 0, 0, 0, 101, 183, 41, 140
+        ];
+        println!("buf {:?}", buf);
+        let dist = CtrlMsg::try_from(&buf[..]).unwrap();
+        println!("dist {:?}", dist.len());
     }
 
     #[test]
-    fn exit() {}
+    fn spawn_reply() {
+        let reply = SpawnReply{
+            refe: NewerReference { 
+                length: 0, 
+                node: SmallAtomUtf8("t".to_string()), 
+                creation: 11111, 
+                id: vec![]
+            },
+            to: NewPid { 
+                node: SmallAtomUtf8("t".to_string()), 
+                id: 0, 
+                serial: 0, 
+                creation: 11111 
+            },
+            flags: SmallInteger(0),
+            result: PidOrAtom::Pid(NewPid { 
+                node: SmallAtomUtf8("t".to_string()), 
+                id: 0, 
+                serial: 0, 
+                creation: 11111 
+            }),
+        };
+
+        let ctrl_msg = CtrlMsg::new(reply.into(), None);
+        let mut buf = vec![];
+        let _ = ctrl_msg.encode(&mut buf);
+        assert_eq!(ctrl_msg.len() + 4, buf.len());
+        println!("ctrl_msg {:?}", ctrl_msg);
+    }
 
     //#[test]
     //fn send() {
