@@ -199,21 +199,14 @@ impl NodeAsServer {
         let listener = TcpListener::bind("0.0.0.0:0").await?;
         let port = listener.local_addr()?.port();
         let mut epmd_client = EpmdClient::new(epmd_addr).await?;
-        let nodes = epmd_client.req_names().await?.nodes;
-        let is_exists = nodes
-            .iter()
-            .any(|n| n.name == self.node_name);
+        let resp = epmd_client
+                .register_node(port, &self.node_name)
+                .await?;
 
-        if !is_exists {
-            let resp = epmd_client
-                    .register_node(port, &self.node_name)
-                    .await?;
-
-            if resp.result != 0 {
-                return Err(Error::Anyhow(anyhow::anyhow!(
-                    "Faild register node to epmd"
-                )));
-            }
+        if resp.result != 0 {
+            return Err(Error::Anyhow(anyhow::anyhow!(
+                "Faild register node to epmd, maybe {:?} is still in use", self.node_name
+            )));
         }
 
         self.node_name.push('@');

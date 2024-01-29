@@ -164,7 +164,7 @@ impl EpmdClient {
         // Send request
         self.stream.write_all(&buf).await?;
 
-        // Wait resp
+        //// Wait resp
         self.stream.read_exact(&mut buf[0..6]).await?;
         // result
         let result = buf[1];
