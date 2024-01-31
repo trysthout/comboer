@@ -1,6 +1,6 @@
 use bytes::Buf;
 
-use crate::{dist::OpCode, etf::term::*, Encoder, Len};
+use crate::{dist::OpCode, etf::term::*, Encoder, Len, ProcessKind};
 
 macro_rules! define_ctrl {
     (
@@ -65,6 +65,49 @@ macro_rules! define_ctrl {
     };
 }
 
+macro_rules! impl_process_kind {
+    ($sn:ident, $from:ident, $to:ident) => {
+        impl ProcessKind for $sn {
+            fn get_from_pid_atom(&self) -> Option<PidOrAtom> {
+                Some((&self.$from).into())
+            }
+            fn get_to_pid_atom(&self) -> Option<PidOrAtom> {
+                Some((&self.$to).into())
+            }
+        }
+    };
+    ($sn:ident, $from:ident, []) => {
+        impl ProcessKind for $sn {
+            fn get_from_pid_atom(&self) -> Option<PidOrAtom> {
+                Some((&self.$from).into())
+            }
+            fn get_to_pid_atom(&self) -> Option<PidOrAtom> {
+                None
+            }
+        }
+    };
+    ($sn:ident, [], $to:ident) => {
+        impl ProcessKind for $sn {
+            fn get_from_pid_atom(&self) -> Option<PidOrAtom> {
+                None
+            }
+            fn get_to_pid_atom(&self) -> Option<PidOrAtom> {
+                Some((&self.$to).into())
+            }
+        }
+    };
+    ($sn:ident) => {
+        impl ProcessKind for $sn {
+            fn get_from_pid_atom(&self) -> Option<PidOrAtom> {
+                None
+            }
+            fn get_to_pid_atom(&self) -> Option<PidOrAtom> {
+                None
+            }
+        }
+    };
+}
+
 define_ctrl!(
     #[doc = "
 {1, FromPid, ToPid}
@@ -77,6 +120,7 @@ This signal is sent by FromPid in order to create a link between FromPid and ToP
     1,
     3
 );
+impl_process_kind!(Link, from, to);
 
 define_ctrl!(
     #[doc = "
@@ -92,6 +136,7 @@ define_ctrl!(
     2,
     3
 );
+impl_process_kind!(SendCtrl, [], to);
 
 define_ctrl!(
     #[doc = "
@@ -107,6 +152,7 @@ define_ctrl!(
     3,
     4
 );
+impl_process_kind!(Exit, from, to);
 
 define_ctrl!(
     #[doc = "
@@ -120,6 +166,7 @@ define_ctrl!(
     4,
     3
 );
+impl_process_kind!(UnLink, from, to);
 
 define_ctrl!(
     #[doc = "
@@ -130,6 +177,7 @@ NODE_LINK
     5,
     1
 );
+impl_process_kind!(NodeLink);
 
 define_ctrl!(
     #[doc = "
@@ -146,6 +194,7 @@ Unused is kept for backward compatibility.
     6,
     4
 );
+impl_process_kind!(RegSend, from, to_name);
 
 define_ctrl!(
     #[doc = "
@@ -159,6 +208,7 @@ GROUP_LEADER
     7,
     3
 );
+impl_process_kind!(GroupLeader, from, to);
 
 define_ctrl!(
     #[doc = "
@@ -173,6 +223,7 @@ EXIT2
     8,
     4
 );
+impl_process_kind!(Exit2, from, to);
 
 define_ctrl!(
     #[doc = "
@@ -189,6 +240,7 @@ Unused is kept for backward compatibility.
     12,
     4
 );
+impl_process_kind!(SendTT, [], to);
 
 define_ctrl!(
     #[doc = "
@@ -204,6 +256,7 @@ define_ctrl!(
     13,
     5
 );
+impl_process_kind!(ExitTT, from, to);
 
 define_ctrl!(
     #[doc = "
@@ -223,6 +276,7 @@ Unused is kept for backward compatibility.
     16,
     5
 );
+impl_process_kind!(RegSendTT, from, to_name);
 
 define_ctrl!(
     #[doc = "
@@ -238,6 +292,7 @@ EXIT2_TT
     18,
     5
 );
+impl_process_kind!(Exit2TT, from, to);
 
 //
 define_ctrl!(
@@ -253,6 +308,7 @@ MONITOR_P
     19,
     4
 );
+impl_process_kind!(MonitorP, from, to_proc);
 
 define_ctrl!(
     #[doc = "
@@ -269,6 +325,7 @@ We include FromPid just in case we want to trace this.
     20,
     4
 );
+impl_process_kind!(DeMonitorP, from, to_proc);
 
 define_ctrl!(
     #[doc = "
@@ -285,6 +342,7 @@ MONITOR_P_EXIT
     5
 );
 
+impl_process_kind!(MonitorPExit, from_proc, to);
 //
 
 //
@@ -303,6 +361,7 @@ This control message replaces the SEND control message and will be sent when the
     22,
     3
 );
+impl_process_kind!(SendSender, from, to);
 
 //
 
@@ -322,6 +381,7 @@ This control message replaces the SEND_TT control message and will be sent when 
     23,
     4
 );
+impl_process_kind!(SendSenderTT, from, to);
 
 //
 define_ctrl!(
@@ -340,6 +400,7 @@ This control message replaces the EXIT control message and will be sent when the
     24,
     3
 );
+impl_process_kind!(PayloadExit, from, to);
 
 //
 define_ctrl!(
@@ -359,6 +420,7 @@ This control message replaces the EXIT_TT control message and will be sent when 
     25,
     4
 );
+impl_process_kind!(PayloadExitTT, from, to);
 
 define_ctrl!(
     #[doc = "
@@ -376,6 +438,7 @@ This control message replaces the EXIT2 control message and will be sent when th
     26,
     3
 );
+impl_process_kind!(PayloadExit2, from, to);
 
 //
 define_ctrl!(
@@ -395,6 +458,7 @@ This control message replaces the EXIT2_TT control message and will be sent when
     27,
     4
 );
+impl_process_kind!(PayloadExit2TT, from, to);
 
 define_ctrl!(
     #[doc = "
@@ -414,6 +478,7 @@ This control message replaces the MONITOR_P_EXIT control message and will be sen
     28,
     4
 );
+impl_process_kind!(PayloadMonitorPExit, from_proc, to);
 
 #[derive(Debug, Clone)]
 pub struct MFA {
@@ -495,6 +560,7 @@ Only supported when the DFLAG_SPAWN distribution flag has been passed.
     29,
     6
 );
+impl_process_kind!(SpawnRequest, from, []);
 
 define_ctrl!(
     #[doc = "
@@ -518,6 +584,7 @@ Only supported when the DFLAG_SPAWN distribution flag has been passed.
     30,
     7
 );
+impl_process_kind!(SpawnRequestTT, from, []);
 
 define_ctrl!(
     #[doc = "
@@ -555,6 +622,7 @@ Only supported when the DFLAG_SPAWN distribution flag has been passed.
     31,
     5
 );
+impl_process_kind!(SpawnReply);
 
 define_ctrl!(
     #[doc = "
@@ -575,6 +643,7 @@ Only supported when the DFLAG_SPAWN distribution flag has been passed.
     32,
     6
 );
+impl_process_kind!(SpawnReplyTT);
 
 define_ctrl!(
     #[doc = "
@@ -596,6 +665,7 @@ This signal is part of the new link protocol which became mandatory as of OTP 26
     35,
     4
 );
+impl_process_kind!(UnLinkId, from, to);
 
 define_ctrl!(
     #[doc = "
@@ -616,6 +686,7 @@ This signal is part of the new link protocol which became mandatory as of OTP 26
     36,
     4
 );
+impl_process_kind!(UnLinkIdAck, from, to);
 
 define_ctrl!(
     #[doc = "
@@ -635,6 +706,7 @@ Nodes that can handle this control message sets the distribution flag DFLAG_ALIA
     33,
     3
 );
+impl_process_kind!(AliasSend, from, alias);
 
 define_ctrl!(
     #[doc = "
@@ -654,6 +726,7 @@ Same as ALIAS_SEND, but also with a sequential trace Token
     34,
     4
 );
+impl_process_kind!(AliasSendTT, from, alias);
 
 macro_rules! impl_ctrl {
     ($($t:ident),+) => {
@@ -755,8 +828,8 @@ impl_ctrl!(
     AliasSendTT
 );
 
-impl Ctrl {
-    pub fn get_from_pid_atom(&self) -> Option<PidOrAtom> {
+impl ProcessKind for Ctrl {
+    fn get_from_pid_atom(&self) -> Option<PidOrAtom> {
         match self {
             Self::AliasSend(v) => Some((&v.from).into()),
             Self::AliasSendTT(v) => Some((&v.from).into()),
@@ -791,7 +864,7 @@ impl Ctrl {
         }
     }
 
-    pub fn get_to_pid_atom(&self) -> Option<PidOrAtom> {
+    fn get_to_pid_atom(&self) -> Option<PidOrAtom> {
         match self {
             Self::AliasSend(v) => Some((&v.alias).into()),
             Self::AliasSendTT(v) => Some((&v.alias).into()),
@@ -824,6 +897,36 @@ impl Ctrl {
             Self::UnLinkId(v) => Some((&v.to).into()),
             Self::UnLinkIdAck(v) => Some((&v.to).into()),
         }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CtrlMsgGeneric<C> {
+    pub ctrl: C,
+    pub msg: Option<Term>,
+}
+
+impl<C> TryFrom<&[u8]> for CtrlMsgGeneric<C>
+where
+    C: for<'a> TryFrom<&'a [u8], Error = anyhow::Error> + Len,
+{
+    type Error = anyhow::Error;
+    fn try_from(mut value: &[u8]) -> Result<Self, Self::Error> {
+        // 112
+        value.get_u8();
+        // 131
+        value.get_u8();
+        let ctrl = C::try_from(value)?;
+        value.advance(ctrl.len());
+        let msg = (!value.is_empty()).then(|| {
+            // 131
+            value.get_u8();
+            let term = Term::from(value);
+            value.advance(term.len());
+            term
+        });
+
+        Ok(Self { ctrl, msg })
     }
 }
 
@@ -918,7 +1021,11 @@ mod test {
         println!("{:?}", expeted);
 
         let buf = vec![
-            112, 131, 104, 5, 97, 31, 90, 0, 3, 119, 8, 97, 64, 102, 101, 100, 111, 114, 97, 101, 175, 178, 25, 0, 3, 114, 239, 107, 28, 0, 1, 21, 162, 101, 84, 88, 119, 8, 97, 64, 102, 101, 100, 111, 114, 97, 0, 0, 0, 120, 0, 0, 0, 0, 101, 175, 178, 25, 97, 0, 88, 119, 11, 114, 117, 115, 116, 64, 102, 101, 100, 111, 114, 97, 0, 0, 0, 2, 0, 0, 0, 0, 101, 183, 41, 140
+            112, 131, 104, 5, 97, 31, 90, 0, 3, 119, 8, 97, 64, 102, 101, 100, 111, 114, 97, 101,
+            175, 178, 25, 0, 3, 114, 239, 107, 28, 0, 1, 21, 162, 101, 84, 88, 119, 8, 97, 64, 102,
+            101, 100, 111, 114, 97, 0, 0, 0, 120, 0, 0, 0, 0, 101, 175, 178, 25, 97, 0, 88, 119,
+            11, 114, 117, 115, 116, 64, 102, 101, 100, 111, 114, 97, 0, 0, 0, 2, 0, 0, 0, 0, 101,
+            183, 41, 140,
         ];
         println!("buf {:?}", buf);
         let dist = CtrlMsg::try_from(&buf[..]).unwrap();
@@ -927,25 +1034,25 @@ mod test {
 
     #[test]
     fn spawn_reply() {
-        let reply = SpawnReply{
-            refe: NewerReference { 
-                length: 0, 
-                node: SmallAtomUtf8("t".to_string()), 
-                creation: 11111, 
-                id: vec![]
+        let reply = SpawnReply {
+            refe: NewerReference {
+                length: 0,
+                node: SmallAtomUtf8("t".to_string()),
+                creation: 11111,
+                id: vec![],
             },
-            to: NewPid { 
-                node: SmallAtomUtf8("t".to_string()), 
-                id: 0, 
-                serial: 0, 
-                creation: 11111 
+            to: NewPid {
+                node: SmallAtomUtf8("t".to_string()),
+                id: 0,
+                serial: 0,
+                creation: 11111,
             },
             flags: SmallInteger(0),
-            result: PidOrAtom::Pid(NewPid { 
-                node: SmallAtomUtf8("t".to_string()), 
-                id: 0, 
-                serial: 0, 
-                creation: 11111 
+            result: PidOrAtom::Pid(NewPid {
+                node: SmallAtomUtf8("t".to_string()),
+                id: 0,
+                serial: 0,
+                creation: 11111,
             }),
         };
 

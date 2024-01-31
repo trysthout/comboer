@@ -1325,6 +1325,12 @@ impl From<&SmallAtomUtf8> for PidOrAtom {
     }
 }
 
+impl From<&PidOrAtom> for PidOrAtom {
+    fn from(value: &PidOrAtom) -> Self {
+        value.clone()
+    }
+}
+
 macro_rules! impl_from_into_term {
     ($($t:ident),+) => {
         #[derive(Debug, Clone, PartialEq)]

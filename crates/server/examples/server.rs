@@ -1,5 +1,6 @@
 use proto::{etf::term, CtrlMsg, RegSend, SendCtrl, SendSender};
-use server::{AsServer, Handler, NodeAsServer, NodePrimitive};
+use server::{AsServer, Handler, NodeAsServer, NodePrimitive, ProcessHandler};
+
 
 #[derive(Debug, Clone)]
 struct A;
@@ -9,6 +10,26 @@ impl AsServer for A {
 
     fn new_session(&mut self) -> Result<Self::Handler, server::Error> {
         Ok(self.clone())
+    }
+}
+
+#[async_trait::async_trait]
+impl ProcessHandler<SendCtrl> for A {
+    type Error = anyhow::Error;
+    async fn call(&mut self, _ctrl: SendCtrl, _msg: Option<term::Term>) -> Result<(), Self::Error> {
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl ProcessHandler<SendSender> for A {
+    type Error = anyhow::Error;
+    async fn call(
+        &mut self,
+        _ctrl: SendSender,
+        _msg: Option<term::Term>,
+    ) -> Result<(), Self::Error> {
+        Ok(())
     }
 }
 
@@ -55,7 +76,7 @@ impl Handler for A {
         let from = ctrl.from;
         let ctrl = SendCtrl {
             unused: term::SmallAtomUtf8("".to_string()),
-            to: from,
+            to: from.clone(),
         };
         let dist = CtrlMsg {
             ctrl: ctrl.clone().into(),

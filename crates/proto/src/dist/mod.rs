@@ -1,5 +1,5 @@
+use crate::term::PidOrAtom;
 use bitflags::bitflags;
-use crate::etf::term::NewPid;
 
 bitflags! {
     #[derive(Debug, Clone)]
@@ -92,21 +92,20 @@ impl Default for DistFlags {
     }
 }
 
-trait OpCode {
+pub trait OpCode {
     const CODE: u8;
     /// The number of elements in the tuple representing control message.
     const ARITY: u8;
 }
 
 pub trait ProcessKind {
-    fn get_from_pid_atom(&self) -> NewPid;
-    fn get_to_pid_atom(&self) -> NewPid;
+    fn get_from_pid_atom(&self) -> Option<PidOrAtom>;
+    fn get_to_pid_atom(&self) -> Option<PidOrAtom>;
 }
 
 pub mod ctrl;
 pub use ctrl::*;
 pub mod epmd;
 pub use epmd::*;
-
 
 pub mod handshake;

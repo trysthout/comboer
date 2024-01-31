@@ -4,6 +4,9 @@ use tokio::net::ToSocketAddrs;
 
 pub mod primitive;
 pub use primitive::*;
+pub mod process;
+pub use process::*;
+
 use tokio::sync::mpsc::error::{SendError, TryRecvError};
 use tokio::sync::oneshot;
 
@@ -23,6 +26,13 @@ pub trait AsServer {
     fn new_session(&mut self) -> Result<Self::Handler, Error>;
 
     fn handle_error(&mut self, _err: Error) {}
+}
+
+#[async_trait]
+pub trait ProcessHandler<C> {
+    type Error;
+
+    async fn call(&mut self, ctrl: C, msg: Option<term::Term>) -> Result<(), Self::Error>;
 }
 
 #[async_trait]

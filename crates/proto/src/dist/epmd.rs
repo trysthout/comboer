@@ -289,12 +289,14 @@ impl EpmdServer {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Default)]
 pub struct EpmdCodec {
     nodes: Arc<DashMap<String, RegisterNodeReq>>,
     port: u16,
 }
 
+#[allow(dead_code)]
 impl EpmdCodec {
     pub fn new(port: u16) -> EpmdCodec {
         Self {

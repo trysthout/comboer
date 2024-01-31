@@ -6,8 +6,12 @@ use std::{
 
 use byteorder::{BigEndian, ByteOrder};
 
+use dashmap::DashMap;
 use proto::{
-    etf::term::{self}, handshake::{HandshakeCodec, HandshakeVersion, Status}, Ctrl, CtrlMsg, Encoder, EpmdClient, Len
+    etf::term::{self},
+    handshake::{HandshakeCodec, HandshakeVersion, Status},
+    term::{NewPid, PidOrAtom},
+    Ctrl, CtrlMsg, Encoder, EpmdClient, Len, ProcessKind,
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -21,7 +25,7 @@ use tokio::{
     },
 };
 
-use crate::node::get_short_hostname;
+use crate::{node::get_short_hostname, Process};
 
 use super::{AsServer, Error, Handler};
 
@@ -77,8 +81,8 @@ impl NodeAsClient {
         let node = NodePrimitive::new(self.node_name.clone(), self.creation, internal_tx);
         let (err_tx, err_rx) = oneshot::channel::<H::Error>();
         tokio::spawn(async move {
-            if let Err(err) = Session::new(internal_rx)
-                .run(stream, handler, Some(node))
+            if let Err(err) = Session::new()
+                .run(stream, handler, Some(node), internal_rx)
                 .await
             {
                 let _ = err_tx.send(err);
@@ -195,17 +199,17 @@ impl NodeAsServer {
         S: AsServer + Send + Clone + 'static,
         <S as AsServer>::Handler: Clone + Sync,
         <<S as AsServer>::Handler as Handler>::Error: Into<Error>,
+        //C: for<'a> TryFrom<&'a [u8], Error = anyhow::Error> + Len + Encoder + ProcessKind + Clone + Send
     {
         let listener = TcpListener::bind("0.0.0.0:0").await?;
         let port = listener.local_addr()?.port();
         let mut epmd_client = EpmdClient::new(epmd_addr).await?;
-        let resp = epmd_client
-                .register_node(port, &self.node_name)
-                .await?;
+        let resp = epmd_client.register_node(port, &self.node_name).await?;
 
         if resp.result != 0 {
             return Err(Error::Anyhow(anyhow::anyhow!(
-                "Faild register node to epmd, maybe {:?} is still in use", self.node_name
+                "Faild register node to epmd, maybe {:?} is still in use",
+                self.node_name
             )));
         }
 
@@ -243,7 +247,7 @@ impl NodeAsServer {
 
                                     let (internal_tx, internal_rx) = unbounded_channel::<(CtrlMsg, oneshot::Sender<()>)>();
                                     let node = NodePrimitive::new(node_name, creation, internal_tx);
-                                    if let Err(err) = Session::new(internal_rx).run(stream, handler, Some(node)).await {
+                                    if let Err(err) = Session::new().run(stream, handler, Some(node), internal_rx).await {
                                         let _ = error_tx.send(err.into());
                                     }
                                 }
@@ -326,21 +330,19 @@ impl NodeAsServer {
     }
 }
 
-struct Session {
-    // receive internal process message, send to outside
-    internal_rx: UnboundedReceiver<(CtrlMsg, oneshot::Sender<()>)>,
-}
+struct Session;
 
 impl Session {
-    fn new(internal_rx: UnboundedReceiver<(CtrlMsg, oneshot::Sender<()>)>) -> Self {
-        Self { internal_rx }
+    fn new() -> Self {
+        Self
     }
 
     async fn run<H: Handler + Send>(
-        mut self,
+        self,
         mut stream: TcpStream,
         mut handler: H,
         mut node: Option<NodePrimitive>,
+        mut receiver: UnboundedReceiver<(CtrlMsg, oneshot::Sender<()>)>,
     ) -> Result<(), H::Error> {
         let mut buf = vec![0; 512];
         let (mut reader, mut writer) = stream.split();
@@ -362,8 +364,10 @@ impl Session {
                     handle_data.set(Self::handle_data(reader, buf, handler, node.take().unwrap()));
 
                 },
-                msg = self.internal_rx.recv() => {
-                    self.send_to_outside(msg, &mut writer).await?;
+                msg = receiver.recv() => {
+                    if let Some(msg) = msg {
+                        Self::handle_internal_msg(msg, &mut writer).await?;
+                    }
                 },
             }
         }
@@ -395,9 +399,13 @@ impl Session {
             .map_err(Error::from)?;
         if buf[0] == 112 {
             let dist = CtrlMsg::try_from(&buf[..length]).map_err(Error::from)?;
+            if let Some(PidOrAtom::Pid(pid)) = dist.ctrl.get_to_pid_atom() {
+                node.send_to_process(pid, dist.ctrl, dist.msg);
+                return Ok((false, stream, buf, node, handler));
+            }
+
             handler =
-                Self::handle_ctrl(dist.ctrl.clone(), dist.msg.clone(), handler, &mut node)
-                    .await?;
+                Self::handle_ctrl(dist.ctrl.clone(), dist.msg.clone(), handler, &mut node).await?;
         }
 
         Ok((false, stream, buf, node, handler))
@@ -426,9 +434,7 @@ impl Session {
             Ctrl::PayloadExit(ctrl) => handler.payload_exit(node, ctrl, msg.unwrap()).await,
             Ctrl::PayloadExitTT(ctrl) => handler.payload_exit_tt(node, ctrl, msg.unwrap()).await,
             Ctrl::PayloadExit2(ctrl) => handler.payload_exit2(node, ctrl, msg.unwrap()).await,
-            Ctrl::PayloadExit2TT(ctrl) => {
-                handler.payload_exit2_tt(node, ctrl, msg.unwrap()).await
-            }
+            Ctrl::PayloadExit2TT(ctrl) => handler.payload_exit2_tt(node, ctrl, msg.unwrap()).await,
             Ctrl::PayloadMonitorPExit(ctrl) => {
                 handler
                     .payload_monitor_p_exit(node, ctrl, msg.unwrap())
@@ -441,9 +447,7 @@ impl Session {
             Ctrl::SendSender(ctrl) => handler.send_sender(node, ctrl, msg.unwrap()).await,
             Ctrl::SendSenderTT(ctrl) => handler.send_sender_tt(node, ctrl, msg.unwrap()).await,
             Ctrl::SpawnRequest(ctrl) => handler.spawn_request(node, ctrl, msg.unwrap()).await,
-            Ctrl::SpawnRequestTT(ctrl) => {
-                handler.spawn_request_tt(node, ctrl, msg.unwrap()).await
-            }
+            Ctrl::SpawnRequestTT(ctrl) => handler.spawn_request_tt(node, ctrl, msg.unwrap()).await,
             Ctrl::SpawnReply(ctrl) => handler.spawn_reply(node, ctrl).await,
             Ctrl::SpawnReplyTT(ctrl) => handler.spawn_reply_tt(node, ctrl).await,
             Ctrl::UnLinkId(ctrl) => handler.unlink_id(node, ctrl).await,
@@ -451,17 +455,14 @@ impl Session {
         }
     }
 
-    async fn send_to_outside(
-        &self,
-        msg: Option<(CtrlMsg, oneshot::Sender<()>)>,
+    async fn handle_internal_msg(
+        msg: (CtrlMsg, oneshot::Sender<()>),
         stream: &mut WriteHalf<'_>,
     ) -> Result<(), Error> {
-        if let Some((msg, wait_tx)) = msg {
-            let mut buf = Vec::with_capacity(4 + msg.len());
-            let _ = msg.encode(&mut buf);
-            stream.write_all(&buf).await?;
-            let _ = wait_tx.send(());
-        }
+        let mut buf = Vec::with_capacity(4 + msg.0.len());
+        let _ = msg.0.encode(&mut buf);
+        stream.write_all(&buf).await?;
+        let _ = msg.1.send(());
 
         Ok(())
     }
@@ -487,11 +488,13 @@ fn read_length(header_length: usize, buf: &[u8]) -> usize {
 
 static UNIQ_ID: AtomicU64 = AtomicU64::new(1);
 static PID_ID: AtomicU64 = AtomicU64::new(1);
-#[derive(Debug, Clone)]
+
+#[derive(Debug)]
 pub struct NodePrimitive {
     node_name: String,
     creation: u32,
     sender: UnboundedSender<(CtrlMsg, oneshot::Sender<()>)>,
+    processes: DashMap<term::NewPid, UnboundedSender<(Ctrl, Option<term::Term>)>>,
 }
 
 impl NodePrimitive {
@@ -504,6 +507,7 @@ impl NodePrimitive {
             node_name: node_name.clone(),
             creation,
             sender,
+            processes: DashMap::new(),
         }
     }
 
@@ -513,14 +517,26 @@ impl NodePrimitive {
         let _ = wait_rx.await;
     }
 
-    pub fn make_pid(&self) -> term::NewPid {
+    pub fn send_to_process(&self, pid: NewPid, ctrl: Ctrl, msg: Option<term::Term>) {
+        let sender = self.processes.get(&pid);
+        if let Some(sender) = sender {
+            let _ = sender.send((ctrl, msg));
+        }
+    }
+
+    pub async fn make_process(&mut self) -> Process {
         let pid_id = PID_ID.fetch_add(1, Ordering::Relaxed);
-        term::NewPid {
+        let pid = term::NewPid {
             node: term::SmallAtomUtf8(self.node_name.clone()),
             id: (pid_id & 0x7fff) as u32,
             serial: ((pid_id >> 15) & 0x1fff) as u32,
             creation: self.creation,
-        }
+        };
+
+        let (sender, receiver) = unbounded_channel::<(Ctrl, Option<term::Term>)>();
+        self.processes.insert(pid.clone(), sender);
+
+        Process::new(pid, receiver, self.sender.clone())
     }
 
     /// create ref. refer to https://github.com/erlang/otp/blob/master/lib/erl_interface/src/connect/ei_connect.c#L745
