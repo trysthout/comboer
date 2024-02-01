@@ -75,6 +75,6 @@ impl From<&Sign> for num_bigint::Sign {
 
 mod error;
 mod ser;
-pub use ser::{Serializer, to_term};
+pub use ser::{to_term, Serializer};
 mod de;
-pub use de::{Deserializer, from_term};
+pub use de::{from_term, Deserializer};

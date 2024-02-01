@@ -31,8 +31,10 @@ pub trait AsServer {
 #[async_trait]
 pub trait ProcessHandler<C> {
     type Error;
+    type Output;
 
-    async fn call(&mut self, ctrl: C, msg: Option<term::Term>) -> Result<(), Self::Error>;
+    async fn call(&mut self, ctrl: C, msg: Option<term::Term>)
+        -> Result<Self::Output, Self::Error>;
 }
 
 #[async_trait]

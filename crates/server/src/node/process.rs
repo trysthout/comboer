@@ -52,22 +52,6 @@ impl Process {
         Ok(None)
     }
 
-    pub async fn recv_with_call<P, C>(
-        &mut self,
-        mut handler: P,
-    ) -> Option<(Ctrl, Option<term::Term>)>
-    where
-        P: ProcessHandler<C>,
-        C: OpCode + TryFrom<Ctrl, Error = anyhow::Error>,
-    {
-        if let Some((ctrl, msg)) = self.receiver.recv().await {
-            let c = C::try_from(ctrl).unwrap();
-            let _ = handler.call(c, msg).await;
-        }
-
-        None
-    }
-
     pub fn get_pid(&self) -> term::NewPid {
         self.pid.clone()
     }
