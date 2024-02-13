@@ -1,33 +1,31 @@
 use std::{
     net::{Ipv4Addr, SocketAddrV4},
-    sync::atomic::{AtomicU64, Ordering},
+    pin::Pin,
+    task::{Context, Poll},
     time::SystemTime,
 };
 
 use byteorder::{BigEndian, ByteOrder};
 
-use dashmap::DashMap;
+
+
+use motore::Service;
 use proto::{
-    etf::term::{self},
-    handshake::{HandshakeCodec, HandshakeVersion, Status},
-    term::{NewPid, PidOrAtom},
-    Ctrl, CtrlMsg, Encoder, EpmdClient, Len, ProcessKind,
+    handshake::{HandshakeCodec, HandshakeVersion, Status}, CtrlMsg, Encoder, EpmdClient, Len,
 };
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
     net::{
-        tcp::{ReadHalf, WriteHalf},
         TcpListener, TcpStream, ToSocketAddrs,
     },
     sync::{
         mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
-        oneshot,
     },
 };
 
-use crate::{node::get_short_hostname, Process};
+use crate::{node::get_short_hostname, Dispatcher, MatchId, ProcessContext};
 
-use super::{AsServer, Error, Handler};
+use super::Error;
 
 #[derive(Debug, Clone)]
 pub struct NodeAsClient {
@@ -36,7 +34,8 @@ pub struct NodeAsClient {
     pub node_name: String,
     pub cookie: String,
     pub creation: u32,
-    internal_tx: Option<UnboundedSender<(CtrlMsg, oneshot::Sender<()>)>>,
+    internal_tx: Option<UnboundedSender<CtrlMsg>>,
+    dispatcher: Dispatcher,
 }
 
 impl NodeAsClient {
@@ -52,15 +51,36 @@ impl NodeAsClient {
             handshaked: false,
             is_tls: false,
             internal_tx: None,
+            dispatcher: Dispatcher::new(),
         }
     }
 
-    pub async fn connect_local_by_name<H: Handler + Send + 'static, A: ToSocketAddrs + Send>(
+    pub fn add_matcher<M>(self, matcher: M) -> Self
+    where
+        M: Service<ProcessContext, CtrlMsg, Response = bool, Error = crate::Error>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+    {
+        let matcher_id = MatchId::next();
+        self.dispatcher.add_matcher(matcher_id, matcher);
+        Self {
+            is_tls: self.is_tls,
+            handshaked: self.handshaked,
+            node_name: self.node_name,
+            cookie: self.cookie,
+            creation: self.creation,
+            internal_tx: self.internal_tx,
+            dispatcher: self.dispatcher,
+        }
+    }
+
+    pub async fn connect_local_by_name<A: ToSocketAddrs>(
         mut self,
         epmd_addr: A,
         remote_node_name: &str,
-        handler: H,
-    ) -> Result<(Self, oneshot::Receiver<H::Error>), Error> {
+    ) -> Result<Connection<TcpStream>, Error> {
         let mut epmd_client = EpmdClient::new(epmd_addr).await?;
         let nodes = epmd_client.req_names().await?.nodes;
         let node = nodes
@@ -76,20 +96,19 @@ impl NodeAsClient {
         let _ = stream.set_nodelay(true);
         let handshake_codec = HandshakeCodec::new(self.node_name.clone(), self.cookie.clone());
         self.client_handshake(handshake_codec, &mut stream).await?;
-        let (internal_tx, internal_rx) = unbounded_channel::<(CtrlMsg, oneshot::Sender<()>)>();
+        let (internal_tx, internal_rx) = unbounded_channel::<CtrlMsg>();
         self.internal_tx = Some(internal_tx.clone());
-        let node = NodePrimitive::new(self.node_name.clone(), self.creation, internal_tx);
-        let (err_tx, err_rx) = oneshot::channel::<H::Error>();
-        tokio::spawn(async move {
-            if let Err(err) = Session::new()
-                .run(stream, handler, Some(node), internal_rx)
-                .await
-            {
-                let _ = err_tx.send(err);
-            }
-        });
+        //let node = NodePrimitive::new(self.node_name.clone(), self.creation, internal_tx);
+        //let (err_tx, err_rx) = oneshot::channel::<Error>();
 
-        Ok((self, err_rx))
+        let cx = ProcessContext::with_dispathcer(
+            self.node_name.clone(),
+            self.creation,
+            self.dispatcher.clone(),
+            internal_tx,
+        );
+        let conn = Connection::new(stream, cx, internal_rx);
+        Ok(conn)
     }
 
     async fn client_handshake(
@@ -158,14 +177,86 @@ impl NodeAsClient {
     }
 
     pub async fn send(&mut self, dist: CtrlMsg) -> Result<(), Error> {
-        let (wait_tx, wait_rx) = oneshot::channel::<()>();
         self.internal_tx
             .as_mut()
             .unwrap()
-            .send((dist, wait_tx))
+            .send(dist)
             .map_err(Error::ChannelSendError)?;
-        let _ = wait_rx.await;
         Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct ServerConfig {}
+pin_project_lite::pin_project! {
+    #[derive(Debug)]
+    pub struct Connection<T> {
+        conn: T,
+        cx: ProcessContext,
+        buf: Vec<u8>,
+        rx: UnboundedReceiver<CtrlMsg>
+    }
+}
+
+impl<T> Connection<T> {
+    pub fn new(conn: T, cx: ProcessContext, rx: UnboundedReceiver<CtrlMsg>) -> Self {
+        Self {
+            conn,
+            cx,
+            buf: vec![0; 1024],
+            rx,
+        }
+    }
+
+    pub fn get_cx(&mut self) -> &mut ProcessContext {
+        &mut self.cx
+    }
+}
+
+impl<T> std::future::Future for Connection<T>
+where
+    T: AsyncRead + AsyncWrite + Unpin,
+{
+    type Output = Result<bool, crate::Error>;
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let me = self.project();
+        let dispatcher = me.cx.get_matcher();
+        if let Poll::Ready(Some(msg)) = me.rx.poll_recv(cx) {
+            let mut buf = Vec::with_capacity(4 + msg.len());
+            let _ = msg.encode(&mut buf);
+            let mut fut = std::pin::pin!(me.conn.write_all(&buf));
+            futures::ready!(fut.as_mut().poll(cx)?);
+            return Poll::Ready(Ok(false));
+        }
+
+        //loop {
+        let r = std::pin::pin!(me.conn.read_exact(&mut me.buf[..4]));
+        if let Err(err) = futures::ready!(r.poll(cx)) {
+            if err.to_string().contains("early eof") {
+                return Poll::Pending;
+            } else {
+                return Poll::Ready(Err(err.into()));
+            }
+        }
+
+        let length = BigEndian::read_u32(&me.buf[..4]) as usize;
+        // Erlang Tick
+        if length == 0 {
+            futures::ready!(Pin::new(&mut *me.conn).poll_write(cx, &[0, 0, 0, 0])?);
+            return Poll::Ready(Ok(false));
+        }
+
+        if length > me.buf.len() {
+            me.buf.resize(length, 0)
+        }
+
+        let r = std::pin::pin!(me.conn.read_exact(&mut me.buf[..length]));
+        let _ = futures::ready!(r.poll(cx)?);
+        let req = CtrlMsg::try_from(&me.buf[..length])?;
+        let mut fut = std::pin::pin!(dispatcher.call(me.cx, req));
+        let res = futures::ready!(fut.as_mut().poll(cx).map_err(Into::<crate::Error>::into)?);
+        Poll::Ready(Ok(res))
+        //}
     }
 }
 
@@ -176,6 +267,8 @@ pub struct NodeAsServer {
     pub node_name: String,
     pub cookie: String,
     pub creation: u32,
+    //dispather: DashMap<MatchId, BoxCloneService<ProcessContext, CtrlMsg, (bool, Option<CtrlMsg>), crate::Error>>,
+    dispatcher: Dispatcher,
 }
 
 impl NodeAsServer {
@@ -190,16 +283,33 @@ impl NodeAsServer {
             creation,
             handshaked: false,
             is_tls: false,
+            dispatcher: Dispatcher::new(),
         }
     }
 
-    pub async fn listen<A, S>(&mut self, epmd_addr: A, server: S) -> Result<(), Error>
+    pub fn add_matcher<M>(self, matcher: M) -> Self
+    where
+        M: Service<ProcessContext, CtrlMsg, Response = bool, Error = crate::Error>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+    {
+        let matcher_id = MatchId::next();
+        self.dispatcher.add_matcher(matcher_id, matcher);
+        Self {
+            node_name: self.node_name,
+            cookie: self.cookie,
+            creation: self.creation,
+            is_tls: self.is_tls,
+            handshaked: self.handshaked,
+            dispatcher: self.dispatcher,
+        }
+    }
+
+    pub async fn listen<A>(mut self, epmd_addr: A) -> Result<(), Error>
     where
         A: ToSocketAddrs,
-        S: AsServer + Send + Clone + 'static,
-        <S as AsServer>::Handler: Clone + Sync,
-        <<S as AsServer>::Handler as Handler>::Error: Into<Error>,
-        //C: for<'a> TryFrom<&'a [u8], Error = anyhow::Error> + Len + Encoder + ProcessKind + Clone + Send
     {
         let listener = TcpListener::bind("0.0.0.0:0").await?;
         let port = listener.local_addr()?.port();
@@ -217,14 +327,12 @@ impl NodeAsServer {
         self.node_name.push_str(&get_short_hostname());
         let handshake_codec = HandshakeCodec::new(self.node_name.clone(), self.cookie.clone());
 
-        let (error_tx, mut error_rx) = unbounded_channel::<Error>();
         loop {
             let node_name = self.node_name.clone();
-            let is_tls = self.is_tls;
+            //let is_tls = self.is_tls;
             let creation = self.creation;
             let handshake_codec = handshake_codec.clone();
-            let error_tx = error_tx.clone();
-            let mut server = server.clone();
+            let dispatcher = self.dispatcher.clone();
 
             tokio::select! {
                 res = listener.accept() => {
@@ -232,36 +340,33 @@ impl NodeAsServer {
                         Ok((mut stream, _)) => {
                             tokio::spawn(
                                 async move {
-                                    if let Err(err) = Self::server_handshake(is_tls, handshake_codec.clone(), &mut stream).await {
-                                        let _ = error_tx.send(err);
+                                    if let Err(err) = Self::server_handshake(self.is_tls, handshake_codec.clone(), &mut stream).await {
+                                        //let _ = error_tx.send(err);
+                                        println!("error {:?}", err);
                                         return;
                                     }
 
-                                    let handler = match server.new_session() {
-                                        Ok(handler) => handler,
-                                        Err(err) => {
-                                            let _ = error_tx.send(err);
-                                            return;
+                                    let (internal_tx, internal_rx) = unbounded_channel::<CtrlMsg>();
+                                    let cx = ProcessContext::with_dispathcer(node_name, creation, dispatcher, internal_tx);
+                                    let mut conn = Connection::new(&mut stream, cx, internal_rx);
+                                    //tokio::pin!(conn);
+                                    loop {
+                                        tokio::select! {
+                                            res = &mut conn => {
+                                                if let Err(err) = res {
+                                                    println!("error {:?}", err);
+                                                }
+                                            }
                                         }
-                                    };
-
-                                    let (internal_tx, internal_rx) = unbounded_channel::<(CtrlMsg, oneshot::Sender<()>)>();
-                                    let node = NodePrimitive::new(node_name, creation, internal_tx);
-                                    if let Err(err) = Session::new().run(stream, handler, Some(node), internal_rx).await {
-                                        let _ = error_tx.send(err.into());
                                     }
                                 }
                             );
                         },
 
-                        Err(err) => {
-                            let _ = error_tx.send(Error::from(err));
+                        Err(_err) => {
                         }
                     }
                 },
-                Some(res) = error_rx.recv() => {
-                    server.handle_error(res);
-                }
             }
         }
     }
@@ -330,144 +435,6 @@ impl NodeAsServer {
     }
 }
 
-struct Session;
-
-impl Session {
-    fn new() -> Self {
-        Self
-    }
-
-    async fn run<H: Handler + Send>(
-        self,
-        mut stream: TcpStream,
-        mut handler: H,
-        mut node: Option<NodePrimitive>,
-        mut receiver: UnboundedReceiver<(CtrlMsg, oneshot::Sender<()>)>,
-    ) -> Result<(), H::Error> {
-        let mut buf = vec![0; 512];
-        let (mut reader, mut writer) = stream.split();
-        let handle_data = Self::handle_data(reader, buf, handler, node.take().unwrap());
-        tokio::pin!(handle_data);
-
-        loop {
-            tokio::select! {
-                res = &mut handle_data => {
-                    let res = res?;
-                    if res.0 {
-                        writer.write(&[0;4]).await.map_err(Error::from)?;
-                    }
-
-                    reader = res.1;
-                    buf = res.2;
-                    node = Some(res.3);
-                    handler = res.4;
-                    handle_data.set(Self::handle_data(reader, buf, handler, node.take().unwrap()));
-
-                },
-                msg = receiver.recv() => {
-                    if let Some(msg) = msg {
-                        Self::handle_internal_msg(msg, &mut writer).await?;
-                    }
-                },
-            }
-        }
-    }
-
-    async fn handle_data<H: Handler + Send>(
-        mut stream: ReadHalf<'_>,
-        mut buf: Vec<u8>,
-        mut handler: H,
-        mut node: NodePrimitive,
-    ) -> Result<(bool, ReadHalf<'_>, Vec<u8>, NodePrimitive, H), H::Error> {
-        stream
-            .read_exact(&mut buf[..4])
-            .await
-            .map_err(Error::from)?;
-        let length = BigEndian::read_u32(&buf[..4]) as usize;
-        // Erlang Tick
-        if length == 0 {
-            return Ok((true, stream, buf, node, handler));
-        }
-
-        if length > buf.len() {
-            buf.resize(length, 0)
-        }
-
-        stream
-            .read_exact(&mut buf[..length])
-            .await
-            .map_err(Error::from)?;
-        if buf[0] == 112 {
-            let dist = CtrlMsg::try_from(&buf[..length]).map_err(Error::from)?;
-            if let Some(PidOrAtom::Pid(pid)) = dist.ctrl.get_to_pid_atom() {
-                node.send_to_process(pid, dist.ctrl, dist.msg);
-                return Ok((false, stream, buf, node, handler));
-            }
-
-            handler =
-                Self::handle_ctrl(dist.ctrl.clone(), dist.msg.clone(), handler, &mut node).await?;
-        }
-
-        Ok((false, stream, buf, node, handler))
-    }
-
-    async fn handle_ctrl<H: Handler + Send>(
-        ctrl: Ctrl,
-        msg: Option<term::Term>,
-        handler: H,
-        node: &mut NodePrimitive,
-    ) -> Result<H, H::Error> {
-        match ctrl {
-            Ctrl::RegSend(ctrl) => handler.reg_send(node, ctrl, msg.unwrap()).await,
-            Ctrl::AliasSend(ctrl) => handler.alias_send(node, ctrl, msg.unwrap()).await,
-            Ctrl::AliasSendTT(ctrl) => handler.alias_send_tt(node, ctrl, msg.unwrap()).await,
-            Ctrl::MonitorP(ctrl) => handler.mointor_p(node, ctrl).await,
-            Ctrl::DeMonitorP(ctrl) => handler.de_monitor_p(node, ctrl).await,
-            Ctrl::MonitorPExit(ctrl) => handler.monitor_p_exit(node, ctrl).await,
-            Ctrl::Exit(ctrl) => handler.exit(node, ctrl).await,
-            Ctrl::ExitTT(ctrl) => handler.exit_tt(node, ctrl).await,
-            Ctrl::Exit2(ctrl) => handler.exit2(node, ctrl).await,
-            Ctrl::Exit2TT(ctrl) => handler.exit2_tt(node, ctrl).await,
-            Ctrl::GroupLeader(ctrl) => handler.group_leader(node, ctrl).await,
-            Ctrl::Link(ctrl) => handler.link(node, ctrl).await,
-            Ctrl::NodeLink(ctrl) => handler.node_link(node, ctrl).await,
-            Ctrl::PayloadExit(ctrl) => handler.payload_exit(node, ctrl, msg.unwrap()).await,
-            Ctrl::PayloadExitTT(ctrl) => handler.payload_exit_tt(node, ctrl, msg.unwrap()).await,
-            Ctrl::PayloadExit2(ctrl) => handler.payload_exit2(node, ctrl, msg.unwrap()).await,
-            Ctrl::PayloadExit2TT(ctrl) => handler.payload_exit2_tt(node, ctrl, msg.unwrap()).await,
-            Ctrl::PayloadMonitorPExit(ctrl) => {
-                handler
-                    .payload_monitor_p_exit(node, ctrl, msg.unwrap())
-                    .await
-            }
-            Ctrl::SendCtrl(ctrl) => handler.send(node, ctrl, msg.unwrap()).await,
-            Ctrl::UnLink(ctrl) => handler.unlink(node, ctrl).await,
-            Ctrl::SendTT(ctrl) => handler.send_tt(node, ctrl, msg.unwrap()).await,
-            Ctrl::RegSendTT(ctrl) => handler.reg_send_tt(node, ctrl, msg.unwrap()).await,
-            Ctrl::SendSender(ctrl) => handler.send_sender(node, ctrl, msg.unwrap()).await,
-            Ctrl::SendSenderTT(ctrl) => handler.send_sender_tt(node, ctrl, msg.unwrap()).await,
-            Ctrl::SpawnRequest(ctrl) => handler.spawn_request(node, ctrl, msg.unwrap()).await,
-            Ctrl::SpawnRequestTT(ctrl) => handler.spawn_request_tt(node, ctrl, msg.unwrap()).await,
-            Ctrl::SpawnReply(ctrl) => handler.spawn_reply(node, ctrl).await,
-            Ctrl::SpawnReplyTT(ctrl) => handler.spawn_reply_tt(node, ctrl).await,
-            Ctrl::UnLinkId(ctrl) => handler.unlink_id(node, ctrl).await,
-            Ctrl::UnLinkIdAck(ctrl) => handler.unlink_id_ack(node, ctrl).await,
-        }
-    }
-
-    async fn handle_internal_msg(
-        msg: (CtrlMsg, oneshot::Sender<()>),
-        stream: &mut WriteHalf<'_>,
-    ) -> Result<(), Error> {
-        let mut buf = Vec::with_capacity(4 + msg.0.len());
-        let _ = msg.0.encode(&mut buf);
-        stream.write_all(&buf).await?;
-        let _ = msg.1.send(());
-
-        Ok(())
-    }
-}
-
 #[inline]
 fn header_length(is_tls: bool, _handshaked: bool) -> usize {
     if is_tls {
@@ -483,74 +450,5 @@ fn read_length(header_length: usize, buf: &[u8]) -> usize {
         BigEndian::read_u32(buf) as usize
     } else {
         BigEndian::read_u16(buf) as usize
-    }
-}
-
-static UNIQ_ID: AtomicU64 = AtomicU64::new(1);
-static PID_ID: AtomicU64 = AtomicU64::new(1);
-
-#[derive(Debug)]
-pub struct NodePrimitive {
-    node_name: String,
-    creation: u32,
-    sender: UnboundedSender<(CtrlMsg, oneshot::Sender<()>)>,
-    processes: DashMap<term::NewPid, UnboundedSender<(Ctrl, Option<term::Term>)>>,
-}
-
-impl NodePrimitive {
-    pub fn new(
-        node_name: String,
-        creation: u32,
-        sender: UnboundedSender<(CtrlMsg, oneshot::Sender<()>)>,
-    ) -> Self {
-        Self {
-            node_name: node_name.clone(),
-            creation,
-            sender,
-            processes: DashMap::new(),
-        }
-    }
-
-    pub async fn send(&self, dist: CtrlMsg) {
-        let (wait_tx, wait_rx) = oneshot::channel::<()>();
-        let _ = self.sender.send((dist, wait_tx));
-        let _ = wait_rx.await;
-    }
-
-    pub fn send_to_process(&self, pid: NewPid, ctrl: Ctrl, msg: Option<term::Term>) {
-        let sender = self.processes.get(&pid);
-        if let Some(sender) = sender {
-            let _ = sender.send((ctrl, msg));
-        }
-    }
-
-    pub async fn make_process(&mut self) -> Process {
-        let pid_id = PID_ID.fetch_add(1, Ordering::Relaxed);
-        let pid = term::NewPid {
-            node: term::SmallAtomUtf8(self.node_name.clone()),
-            id: (pid_id & 0x7fff) as u32,
-            serial: ((pid_id >> 15) & 0x1fff) as u32,
-            creation: self.creation,
-        };
-
-        let (sender, receiver) = unbounded_channel::<(Ctrl, Option<term::Term>)>();
-        self.processes.insert(pid.clone(), sender);
-
-        Process::new(pid, receiver, self.sender.clone())
-    }
-
-    /// create ref. refer to https://github.com/erlang/otp/blob/master/lib/erl_interface/src/connect/ei_connect.c#L745
-    pub fn make_ref(&self) -> term::NewerReference {
-        let uniq_id = UNIQ_ID.fetch_add(1, Ordering::Relaxed);
-        term::NewerReference {
-            length: 3,
-            node: term::SmallAtomUtf8(self.node_name.clone()),
-            creation: self.creation,
-            id: vec![
-                (uniq_id & 0x3ffff) as u32,
-                ((uniq_id >> 18) & 0xffffffff) as u32,
-                ((uniq_id >> (18 + 32)) & 0xffffffff) as u32,
-            ],
-        }
     }
 }

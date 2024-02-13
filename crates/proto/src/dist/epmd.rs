@@ -10,8 +10,8 @@ use tokio::{
 };
 
 ///
-/// 1	2	    1	        1	        2	            2	            2	    Nlen	    2	    Elen
-/// 120	PortNo	NodeType	Protocol	HighestVersion	LowestVersion	Nlen	NodeName	Elen	Extra
+/// 1      2         1            1            2                2                2        Nlen        2        Elen
+/// 120    PortNo    NodeType    Protocol    HighestVersion    LowestVersion    Nlen    NodeName    Elen    Extra
 /// PortNo
 /// The port number on which the node accept connection requests.
 ///

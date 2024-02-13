@@ -23,7 +23,7 @@ pub enum Error {
     InvalidEnumTuple,
     ExpectedBigInt,
     ExpectedTuple,
-    TryFromBigIntError(String),
+    TryFromBigInt(String),
 }
 
 impl ser::Error for Error {
@@ -65,7 +65,7 @@ impl fmt::Display for Error {
             Error::InvalidEnumTuple => "Invalid enum tuple",
             Error::ExpectedBigInt => "Expected a bigint",
             Error::ExpectedTuple => "Expected a tuple",
-            Error::TryFromBigIntError(ref msg) => msg,
+            Error::TryFromBigInt(ref msg) => msg,
         };
 
         formatter.write_str(err_msg)

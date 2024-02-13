@@ -1,105 +1,81 @@
-use proto::{etf::term, CtrlMsg, RegSend, SendCtrl, SendSender};
-use server::{AsServer, Handler, NodeAsServer, NodePrimitive, ProcessHandler};
-
+use motore::Service;
+use proto::{etf::term, term::PidOrAtom, Ctrl, CtrlMsg, ProcessKind, SendSender, SpawnReply};
+use server::NodeAsServer;
 
 #[derive(Debug, Clone)]
-struct A;
+struct C(term::NewPid);
 
-impl AsServer for A {
-    type Handler = Self;
+impl Service<server::ProcessContext, CtrlMsg> for C {
+    type Response = bool;
+    type Error = server::Error;
+    async fn call<'s, 'cx>(
+        &'s self,
+        cx: &'cx mut server::ProcessContext,
+        req: CtrlMsg,
+    ) -> Result<Self::Response, Self::Error> {
+        let Some(PidOrAtom::Pid(pid)) = req.ctrl.get_to_pid_atom() else {
+            return Ok(false);
+        };
 
-    fn new_session(&mut self) -> Result<Self::Handler, server::Error> {
-        Ok(self.clone())
-    }
-}
-
-#[async_trait::async_trait]
-impl ProcessHandler<SendCtrl> for A {
-    type Error = anyhow::Error;
-    async fn call(&mut self, _ctrl: SendCtrl, _msg: Option<term::Term>) -> Result<(), Self::Error> {
-        Ok(())
-    }
-}
-
-#[async_trait::async_trait]
-impl ProcessHandler<SendSender> for A {
-    type Error = anyhow::Error;
-    async fn call(
-        &mut self,
-        _ctrl: SendSender,
-        _msg: Option<term::Term>,
-    ) -> Result<(), Self::Error> {
-        Ok(())
-    }
-}
-
-#[async_trait::async_trait]
-impl Handler for A {
-    type Error = anyhow::Error;
-
-    async fn reg_send(
-        self,
-        stream: &mut NodePrimitive,
-        _ctrl: RegSend,
-        msg: term::Term,
-    ) -> Result<Self, Self::Error> {
-        if let Ok(tuple) = term::SmallTuple::try_from(msg.clone()) {
-            if let Ok(p) = term::NewPid::try_from(&tuple.elems[1]) {
-                //let mut data = vec![];
-                let reg = SendCtrl {
-                    unused: term::SmallAtomUtf8("".to_string()),
-                    to: p,
-                };
-
-                let msg = term::SmallAtomUtf8("ccccccccccccccccc".to_string());
-                let dist = CtrlMsg {
-                    ctrl: reg.into(),
-                    msg: Some(msg.into()),
-                };
-
-                //dist.encode(&mut data)?;
-                stream.send(dist).await;
-
-                //stream.write_all(&data).await?;
-            }
+        if pid != self.0 {
+            return Ok(false);
         }
 
-        Ok(self)
+        let ctrl = SendSender::try_from(req.ctrl).unwrap();
+        let ctrl = SendSender {
+            from: ctrl.to,
+            to: ctrl.from,
+        };
+
+        let msg = term::SmallTuple {
+            arity: 2,
+            elems: vec![
+                term::SmallAtomUtf8("from_rust".to_string()).into(),
+                term::SmallAtomUtf8("rust node".to_string()).into(),
+            ],
+        };
+
+        let ctrl_msg = CtrlMsg::new(ctrl.into(), Some(msg.into()));
+        cx.send(ctrl_msg);
+
+        Ok(true)
     }
+}
 
-    async fn send_sender(
-        self,
-        stream: &mut NodePrimitive,
-        ctrl: SendSender,
-        _msg: term::Term,
-    ) -> Result<Self, Self::Error> {
-        let from = ctrl.from;
-        let ctrl = SendCtrl {
-            unused: term::SmallAtomUtf8("".to_string()),
-            to: from.clone(),
-        };
-        let dist = CtrlMsg {
-            ctrl: ctrl.clone().into(),
-            msg: Some(
-                term::SmallTuple {
-                    arity: 2,
-                    elems: vec![
-                        term::SmallAtomUtf8("from_rust".to_string()).into(),
-                        term::SmallAtomUtf8("rust node".to_string()).into(),
-                    ],
-                }
-                .into(),
-            ),
+#[derive(Clone)]
+struct B;
+
+impl Service<server::ProcessContext, CtrlMsg> for B {
+    type Response = bool;
+    type Error = server::Error;
+    async fn call<'s, 'cx>(
+        &'s self,
+        cx: &'cx mut server::ProcessContext,
+        req: CtrlMsg,
+    ) -> Result<Self::Response, Self::Error> {
+        let Ctrl::SpawnRequest(req) = req.ctrl else {
+            return Ok(false);
         };
 
-        stream.send(dist).await;
+        let result_process = cx.make_process();
+        cx.add_matcher(C(result_process.get_pid()));
 
-        Ok(self)
+        let ctrl = SpawnReply {
+            refe: req.refe,
+            to: req.from,
+            flags: term::SmallInteger(0),
+            result: result_process.get_pid_ref().into(),
+        };
+
+        let ctrl_msg = CtrlMsg::new(ctrl.into(), None);
+        cx.send(ctrl_msg);
+
+        Ok(true)
     }
 }
 
 #[tokio::main]
 async fn main() {
-    let mut node = NodeAsServer::new("rust".to_string(), "aaa".to_string());
-    node.listen("127.0.0.1:4369", A).await.unwrap();
+    let node = NodeAsServer::new("rust".to_string(), "aaa".to_string()).add_matcher(B);
+    node.listen("127.0.0.1:4369").await.unwrap();
 }

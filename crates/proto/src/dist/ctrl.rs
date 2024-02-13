@@ -65,7 +65,7 @@ macro_rules! define_ctrl {
     };
 }
 
-macro_rules! impl_process_kind {
+macro_rules! impl_process {
     ($sn:ident, $from:ident, $to:ident) => {
         impl ProcessKind for $sn {
             fn get_from_pid_atom(&self) -> Option<PidOrAtom> {
@@ -120,7 +120,7 @@ This signal is sent by FromPid in order to create a link between FromPid and ToP
     1,
     3
 );
-impl_process_kind!(Link, from, to);
+impl_process!(Link, from, to);
 
 define_ctrl!(
     #[doc = "
@@ -136,7 +136,7 @@ define_ctrl!(
     2,
     3
 );
-impl_process_kind!(SendCtrl, [], to);
+impl_process!(SendCtrl, [], to);
 
 define_ctrl!(
     #[doc = "
@@ -152,7 +152,7 @@ define_ctrl!(
     3,
     4
 );
-impl_process_kind!(Exit, from, to);
+impl_process!(Exit, from, to);
 
 define_ctrl!(
     #[doc = "
@@ -166,7 +166,7 @@ define_ctrl!(
     4,
     3
 );
-impl_process_kind!(UnLink, from, to);
+impl_process!(UnLink, from, to);
 
 define_ctrl!(
     #[doc = "
@@ -177,7 +177,7 @@ NODE_LINK
     5,
     1
 );
-impl_process_kind!(NodeLink);
+impl_process!(NodeLink);
 
 define_ctrl!(
     #[doc = "
@@ -194,7 +194,7 @@ Unused is kept for backward compatibility.
     6,
     4
 );
-impl_process_kind!(RegSend, from, to_name);
+impl_process!(RegSend, from, to_name);
 
 define_ctrl!(
     #[doc = "
@@ -208,7 +208,7 @@ GROUP_LEADER
     7,
     3
 );
-impl_process_kind!(GroupLeader, from, to);
+impl_process!(GroupLeader, from, to);
 
 define_ctrl!(
     #[doc = "
@@ -223,7 +223,7 @@ EXIT2
     8,
     4
 );
-impl_process_kind!(Exit2, from, to);
+impl_process!(Exit2, from, to);
 
 define_ctrl!(
     #[doc = "
@@ -240,7 +240,7 @@ Unused is kept for backward compatibility.
     12,
     4
 );
-impl_process_kind!(SendTT, [], to);
+impl_process!(SendTT, [], to);
 
 define_ctrl!(
     #[doc = "
@@ -256,7 +256,7 @@ define_ctrl!(
     13,
     5
 );
-impl_process_kind!(ExitTT, from, to);
+impl_process!(ExitTT, from, to);
 
 define_ctrl!(
     #[doc = "
@@ -276,7 +276,7 @@ Unused is kept for backward compatibility.
     16,
     5
 );
-impl_process_kind!(RegSendTT, from, to_name);
+impl_process!(RegSendTT, from, to_name);
 
 define_ctrl!(
     #[doc = "
@@ -292,7 +292,7 @@ EXIT2_TT
     18,
     5
 );
-impl_process_kind!(Exit2TT, from, to);
+impl_process!(Exit2TT, from, to);
 
 //
 define_ctrl!(
@@ -308,7 +308,7 @@ MONITOR_P
     19,
     4
 );
-impl_process_kind!(MonitorP, from, to_proc);
+impl_process!(MonitorP, from, to_proc);
 
 define_ctrl!(
     #[doc = "
@@ -325,7 +325,7 @@ We include FromPid just in case we want to trace this.
     20,
     4
 );
-impl_process_kind!(DeMonitorP, from, to_proc);
+impl_process!(DeMonitorP, from, to_proc);
 
 define_ctrl!(
     #[doc = "
@@ -342,7 +342,7 @@ MONITOR_P_EXIT
     5
 );
 
-impl_process_kind!(MonitorPExit, from_proc, to);
+impl_process!(MonitorPExit, from_proc, to);
 //
 
 //
@@ -361,7 +361,7 @@ This control message replaces the SEND control message and will be sent when the
     22,
     3
 );
-impl_process_kind!(SendSender, from, to);
+impl_process!(SendSender, from, to);
 
 //
 
@@ -381,7 +381,7 @@ This control message replaces the SEND_TT control message and will be sent when 
     23,
     4
 );
-impl_process_kind!(SendSenderTT, from, to);
+impl_process!(SendSenderTT, from, to);
 
 //
 define_ctrl!(
@@ -400,7 +400,7 @@ This control message replaces the EXIT control message and will be sent when the
     24,
     3
 );
-impl_process_kind!(PayloadExit, from, to);
+impl_process!(PayloadExit, from, to);
 
 //
 define_ctrl!(
@@ -420,7 +420,7 @@ This control message replaces the EXIT_TT control message and will be sent when 
     25,
     4
 );
-impl_process_kind!(PayloadExitTT, from, to);
+impl_process!(PayloadExitTT, from, to);
 
 define_ctrl!(
     #[doc = "
@@ -438,7 +438,7 @@ This control message replaces the EXIT2 control message and will be sent when th
     26,
     3
 );
-impl_process_kind!(PayloadExit2, from, to);
+impl_process!(PayloadExit2, from, to);
 
 //
 define_ctrl!(
@@ -458,7 +458,7 @@ This control message replaces the EXIT2_TT control message and will be sent when
     27,
     4
 );
-impl_process_kind!(PayloadExit2TT, from, to);
+impl_process!(PayloadExit2TT, from, to);
 
 define_ctrl!(
     #[doc = "
@@ -478,7 +478,7 @@ This control message replaces the MONITOR_P_EXIT control message and will be sen
     28,
     4
 );
-impl_process_kind!(PayloadMonitorPExit, from_proc, to);
+impl_process!(PayloadMonitorPExit, from_proc, to);
 
 #[derive(Debug, Clone)]
 pub struct MFA {
@@ -560,7 +560,7 @@ Only supported when the DFLAG_SPAWN distribution flag has been passed.
     29,
     6
 );
-impl_process_kind!(SpawnRequest, from, []);
+impl_process!(SpawnRequest, from, []);
 
 define_ctrl!(
     #[doc = "
@@ -584,7 +584,7 @@ Only supported when the DFLAG_SPAWN distribution flag has been passed.
     30,
     7
 );
-impl_process_kind!(SpawnRequestTT, from, []);
+impl_process!(SpawnRequestTT, from, []);
 
 define_ctrl!(
     #[doc = "
@@ -622,7 +622,7 @@ Only supported when the DFLAG_SPAWN distribution flag has been passed.
     31,
     5
 );
-impl_process_kind!(SpawnReply);
+impl_process!(SpawnReply);
 
 define_ctrl!(
     #[doc = "
@@ -643,7 +643,7 @@ Only supported when the DFLAG_SPAWN distribution flag has been passed.
     32,
     6
 );
-impl_process_kind!(SpawnReplyTT);
+impl_process!(SpawnReplyTT);
 
 define_ctrl!(
     #[doc = "
@@ -665,7 +665,7 @@ This signal is part of the new link protocol which became mandatory as of OTP 26
     35,
     4
 );
-impl_process_kind!(UnLinkId, from, to);
+impl_process!(UnLinkId, from, to);
 
 define_ctrl!(
     #[doc = "
@@ -686,7 +686,7 @@ This signal is part of the new link protocol which became mandatory as of OTP 26
     36,
     4
 );
-impl_process_kind!(UnLinkIdAck, from, to);
+impl_process!(UnLinkIdAck, from, to);
 
 define_ctrl!(
     #[doc = "
@@ -706,7 +706,7 @@ Nodes that can handle this control message sets the distribution flag DFLAG_ALIA
     33,
     3
 );
-impl_process_kind!(AliasSend, from, alias);
+impl_process!(AliasSend, from, alias);
 
 define_ctrl!(
     #[doc = "
@@ -726,7 +726,7 @@ Same as ALIAS_SEND, but also with a sequential trace Token
     34,
     4
 );
-impl_process_kind!(AliasSendTT, from, alias);
+impl_process!(AliasSendTT, from, alias);
 
 macro_rules! impl_ctrl {
     ($($t:ident),+) => {

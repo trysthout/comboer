@@ -52,7 +52,7 @@ impl<'de> Deserializer<'de> {
     fn parse_bigint<T: TryFrom<&'de num_bigint::BigInt>>(&self) -> Result<T, Error> {
         match self.input {
             Term::SmallBig(v) => T::try_from(&v.n).map_err(|_| {
-                Error::TryFromBigIntError(format!(
+                Error::TryFromBigInt(format!(
                     "Cannot to attempt conversion from bigint type: {}",
                     &v.n
                 ))

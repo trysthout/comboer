@@ -63,8 +63,8 @@ trait TermTag {
 //}
 
 ///
-/// 1	2	Len
-/// 118	Len	AtomName
+/// 1   2   Len
+/// 118 Len AtomName
 ///
 #[derive(Debug, Clone, PartialEq)]
 pub struct AtomUtf8(pub String);
@@ -100,8 +100,8 @@ impl Len for AtomUtf8 {
 }
 
 ///
-/// 1	 1	    Len
-/// 119  Len	AtomName
+/// 1    1      Len
+/// 119  Len    AtomName
 ///
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SmallAtomUtf8(pub String);
@@ -138,8 +138,8 @@ impl Len for SmallAtomUtf8 {
 }
 
 ///
-/// 1	 N	    4	4	    1
-/// 103	 Node	ID	Serial	Creation
+/// 1    N      4   4       1
+/// 103  Node   ID  Serial  Creation
 ///
 #[derive(Debug, Clone, PartialEq)]
 pub struct Pid {
@@ -190,8 +190,8 @@ impl Len for Pid {
 
 ///
 ///
-/// 1	N	    4	4	    4
-/// 88	Node	ID	Serial	Creation
+/// 1   N       4   4       4
+/// 88  Node    ID  Serial  Creation
 ///
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct NewPid {
@@ -243,8 +243,8 @@ impl Len for NewPid {
 
 ///
 ///
-/// 1	1
-/// 97	Int
+/// 1   1
+/// 97  Int
 ///
 #[derive(Debug, Clone, PartialEq)]
 pub struct SmallInteger(pub u8);
@@ -278,8 +278,8 @@ impl Len for SmallInteger {
 }
 
 ///
-/// 1	4
-/// 98	Int
+/// 1   4
+/// 98  Int
 ///
 #[derive(Debug, Clone, PartialEq)]
 pub struct Integer(pub i32);
@@ -348,8 +348,8 @@ impl Len for FixedInteger {
 }
 
 ///
-/// 1	31
-/// 99	Float string
+/// 1   31
+/// 99  Float string
 ///
 #[derive(Debug, Clone, PartialEq)]
 pub struct Float(String);
@@ -384,8 +384,8 @@ impl Len for Float {
 }
 
 ///
-/// 1	8
-/// 70	IEEE float
+/// 1   8
+/// 70  IEEE float
 ///
 ///
 #[derive(Debug, Clone, PartialEq)]
@@ -419,8 +419,8 @@ impl Len for NewFloat {
 }
 
 ///
-/// 1	N	 4	1
-/// 102	Node ID	Creation
+/// 1   N    4  1
+/// 102 Node ID Creation
 ///
 #[derive(Debug, Clone, PartialEq)]
 pub struct Port {
@@ -467,8 +467,8 @@ impl Len for Port {
 }
 
 ///
-/// 1	N	    4	 4
-/// 89	Node    ID	 Creation
+/// 1   N       4    4
+/// 89  Node    ID   Creation
 ///
 #[derive(Debug, Clone, PartialEq)]
 pub struct NewPort {
@@ -515,8 +515,8 @@ impl Len for NewPort {
 }
 
 ///
-/// 1	N	    8	4
-/// 120	Node	ID	Creation
+/// 1   N       8   4
+/// 120 Node    ID  Creation
 ///
 #[derive(Debug, Clone, PartialEq)]
 pub struct V4Port {
@@ -562,8 +562,8 @@ impl Len for V4Port {
 }
 
 ///
-/// 1	 1	    N
-/// 104	 Arity	Elements
+/// 1    1      N
+/// 104  Arity  Elements
 ///
 #[derive(Debug, Clone, PartialEq)]
 pub struct SmallTuple {
@@ -619,8 +619,8 @@ impl Len for SmallTuple {
 }
 
 ///
-/// 1	 4	    N
-/// 105	 Arity	Elements
+/// 1    4      N
+/// 105  Arity  Elements
 ///
 #[derive(Debug, Clone, PartialEq)]
 pub struct LargeTuple {
@@ -667,8 +667,8 @@ impl Len for LargeTuple {
 }
 
 ///
-/// 1	4	    N
-/// 116	Arity	Pairs
+/// 1   4       N
+/// 116 Arity   Pairs
 ///
 #[derive(Debug, Clone, PartialEq)]
 pub struct Map {
@@ -748,8 +748,8 @@ impl Len for Nil {
 }
 
 ///
-/// 1	2	Len
-/// 107	Length	Characters
+/// 1   2   Len
+/// 107 Length  Characters
 ///
 #[derive(Debug, Clone, PartialEq)]
 pub struct StringExt {
@@ -792,8 +792,8 @@ impl Len for StringExt {
 }
 
 ///
-/// 1	4
-/// 108	Length	Elements	Tail
+/// 1   4
+/// 108 Length  Elements    Tail
 ///
 #[derive(Debug, Clone, PartialEq)]
 pub struct List {
@@ -861,8 +861,8 @@ impl Len for List {
 }
 
 ///
-/// 1	4	Len
-/// 109	Len	Data
+/// 1   4   Len
+/// 109 Len Data
 ///
 #[derive(Debug, Clone, PartialEq)]
 pub struct Binary {
@@ -905,8 +905,8 @@ impl Len for Binary {
 }
 
 ///
-/// 1	1	1	    n
-/// 110	n	Sign	d(0) ... d(n-1)
+/// 1   1   1       n
+/// 110 n   Sign    d(0) ... d(n-1)
 ///
 #[derive(Debug, Clone, PartialEq)]
 pub struct SmallBig {
@@ -951,8 +951,8 @@ impl Len for SmallBig {
 }
 
 ///
-///  1	4	1	    n
-/// 111	n	Sign	d(0) ... d(n-1)
+///  1  4   1       n
+/// 111 n   Sign    d(0) ... d(n-1)
 ///
 #[derive(Debug, Clone, PartialEq)]
 pub struct LargeBig {
@@ -992,8 +992,8 @@ impl<'a> From<&'a [u8]> for LargeBig {
 
 ///
 ///
-/// 1	2	N	    4	        N'
-/// 90	Len	Node	Creation	ID ...
+/// 1   2   N       4           N'
+/// 90  Len Node    Creation    ID ...
 ///
 #[derive(Debug, Clone, PartialEq)]
 pub struct NewerReference {
@@ -1049,8 +1049,8 @@ impl Len for NewerReference {
 }
 
 ///
-/// 1	4	1	    Len
-/// 77	Len	Bits	Data
+/// 1   4   1       Len
+/// 77  Len Bits    Data
 ///
 #[derive(Debug, Clone, PartialEq)]
 pub struct BitBinary {
@@ -1101,8 +1101,8 @@ impl Len for BitBinary {
 
 ///
 ///
-/// 1	N1	    N2	        N3
-/// 113	Module	Function	Arity
+/// 1   N1      N2          N3
+/// 113 Module  Function    Arity
 ///
 #[derive(Debug, Clone, PartialEq)]
 pub struct Export {
@@ -1152,8 +1152,8 @@ impl Len for Export {
 }
 
 ///
-/// 1	4	    1	    16	    4	    4	    N1	    N2	        N3	    N4	N5
-/// 112	Size	Arity	Uniq	Index	NumFree	Module	OldIndex	OldUniq	Pid	Free Vars
+/// 1   4       1       16      4       4       N1      N2          N3      N4  N5
+/// 112 Size    Arity   Uniq    Index   NumFree Module  OldIndex    OldUniq Pid Free Vars
 ///
 #[derive(Debug, Clone, PartialEq)]
 pub struct NewFun {
