@@ -7,20 +7,15 @@ use std::{
 
 use byteorder::{BigEndian, ByteOrder};
 
-
-
 use motore::Service;
 use proto::{
-    handshake::{HandshakeCodec, HandshakeVersion, Status}, CtrlMsg, Encoder, EpmdClient, Len,
+    handshake::{HandshakeCodec, HandshakeVersion, Status},
+    CtrlMsg, Encoder, EpmdClient, Len,
 };
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
-    net::{
-        TcpListener, TcpStream, ToSocketAddrs,
-    },
-    sync::{
-        mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
-    },
+    net::{TcpListener, TcpStream},
+    sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
 };
 
 use crate::{node::get_short_hostname, Dispatcher, MatchId, ProcessContext};
@@ -34,12 +29,13 @@ pub struct NodeAsClient {
     pub node_name: String,
     pub cookie: String,
     pub creation: u32,
+    epmd_addr: &'static str,
     internal_tx: Option<UnboundedSender<CtrlMsg>>,
     dispatcher: Dispatcher,
 }
 
 impl NodeAsClient {
-    pub fn new(node_name: String, cookie: String) -> Self {
+    pub fn new(node_name: String, cookie: String, epmd_addr: &'static str) -> Self {
         let creation = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap()
@@ -52,6 +48,7 @@ impl NodeAsClient {
             is_tls: false,
             internal_tx: None,
             dispatcher: Dispatcher::new(),
+            epmd_addr,
         }
     }
 
@@ -73,15 +70,15 @@ impl NodeAsClient {
             creation: self.creation,
             internal_tx: self.internal_tx,
             dispatcher: self.dispatcher,
+            epmd_addr: self.epmd_addr,
         }
     }
 
-    pub async fn connect_local_by_name<A: ToSocketAddrs>(
+    pub async fn connect_local_by_name(
         mut self,
-        epmd_addr: A,
         remote_node_name: &str,
     ) -> Result<Connection<TcpStream>, Error> {
-        let mut epmd_client = EpmdClient::new(epmd_addr).await?;
+        let mut epmd_client = EpmdClient::new(self.epmd_addr).await?;
         let nodes = epmd_client.req_names().await?.nodes;
         let node = nodes
             .iter()
@@ -98,8 +95,6 @@ impl NodeAsClient {
         self.client_handshake(handshake_codec, &mut stream).await?;
         let (internal_tx, internal_rx) = unbounded_channel::<CtrlMsg>();
         self.internal_tx = Some(internal_tx.clone());
-        //let node = NodePrimitive::new(self.node_name.clone(), self.creation, internal_tx);
-        //let (err_tx, err_rx) = oneshot::channel::<Error>();
 
         let cx = ProcessContext::with_dispathcer(
             self.node_name.clone(),
@@ -267,12 +262,12 @@ pub struct NodeAsServer {
     pub node_name: String,
     pub cookie: String,
     pub creation: u32,
-    //dispather: DashMap<MatchId, BoxCloneService<ProcessContext, CtrlMsg, (bool, Option<CtrlMsg>), crate::Error>>,
+    epmd_addr: &'static str,
     dispatcher: Dispatcher,
 }
 
 impl NodeAsServer {
-    pub fn new(node_name: String, cookie: String) -> Self {
+    pub fn new(node_name: String, cookie: String, epmd_addr: &'static str) -> Self {
         let creation = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap()
@@ -284,6 +279,7 @@ impl NodeAsServer {
             handshaked: false,
             is_tls: false,
             dispatcher: Dispatcher::new(),
+            epmd_addr,
         }
     }
 
@@ -304,16 +300,14 @@ impl NodeAsServer {
             is_tls: self.is_tls,
             handshaked: self.handshaked,
             dispatcher: self.dispatcher,
+            epmd_addr: self.epmd_addr,
         }
     }
 
-    pub async fn listen<A>(mut self, epmd_addr: A) -> Result<(), Error>
-    where
-        A: ToSocketAddrs,
-    {
+    pub async fn listen(mut self) -> Result<(), Error> {
         let listener = TcpListener::bind("0.0.0.0:0").await?;
         let port = listener.local_addr()?.port();
-        let mut epmd_client = EpmdClient::new(epmd_addr).await?;
+        let mut epmd_client = EpmdClient::new(self.epmd_addr).await?;
         let resp = epmd_client.register_node(port, &self.node_name).await?;
 
         if resp.result != 0 {

@@ -20,8 +20,13 @@ impl Service<server::ProcessContext, CtrlMsg> for A {
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
-    let node = NodeAsClient::new("rust@fedora".to_string(), "aaa".to_string()).add_matcher(A);
-    let mut conn = node.connect_local_by_name("127.0.0.1:4369", "a").await?;
+    let node = NodeAsClient::new(
+        "rust@fedora".to_string(),
+        "aaa".to_string(),
+        "127.0.0.1:4369",
+    )
+    .add_matcher(A);
+    let mut conn = node.connect_local_by_name("a").await?;
 
     let process = conn.get_cx().make_process();
     let from = process.get_pid();
@@ -43,7 +48,6 @@ async fn main() -> Result<(), anyhow::Error> {
     .into();
 
     conn.get_cx().send(CtrlMsg::new(ctrl.clone(), Some(msg)));
-    let _ = (&mut conn).await;
 
     let msg: term::Term = term::SmallTuple {
         arity: 2,
@@ -54,7 +58,13 @@ async fn main() -> Result<(), anyhow::Error> {
     }
     .into();
     conn.get_cx().send(CtrlMsg::new(ctrl, Some(msg)));
-    let _ = (&mut conn).await;
 
-    Ok(())
+    loop {
+        tokio::select! {
+            res = &mut conn => {
+                println!("result {:?}", res)
+
+            }
+        }
+    }
 }

@@ -3,7 +3,8 @@ use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use dashmap::DashMap;
 use motore::{BoxCloneService, Service};
 use proto::{
-    term::{self}, CtrlMsg,
+    term::{self},
+    CtrlMsg,
 };
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -25,7 +26,6 @@ impl Process {
         &self.pid
     }
 }
-
 
 static UNIQ_ID: AtomicU64 = AtomicU64::new(1);
 static PID_ID: AtomicU64 = AtomicU64::new(1);

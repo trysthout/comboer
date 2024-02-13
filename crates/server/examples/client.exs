@@ -1,9 +1,18 @@
 defmodule Client do
   def handle() do
-    Node.connect(:rust@fedora);
-    Process.send({:name, :rust@fedora}, {:hi, self()}, [])
+    pid = Node.spawn(:rust@fedora, IO, :inspect, [])
+    IO.inspect([:pid, pid])
+    Process.send(pid, {:hi, self()}, [])
+    loop()
+  end
+
+  def loop() do
     receive do
-      m -> IO.inspect(m)
+      {:call, pid} -> 
+        IO.inspect(:call)
+        loop()
+      msg ->
+        IO.inspect(msg)
     end
   end
 end
