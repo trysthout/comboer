@@ -224,7 +224,6 @@ where
             return Poll::Ready(Ok(false));
         }
 
-        //loop {
         let r = std::pin::pin!(me.conn.read_exact(&mut me.buf[..4]));
         if let Err(err) = futures::ready!(r.poll(cx)) {
             if err.to_string().contains("early eof") {
@@ -251,7 +250,6 @@ where
         let mut fut = std::pin::pin!(dispatcher.call(me.cx, req));
         let res = futures::ready!(fut.as_mut().poll(cx).map_err(Into::<crate::Error>::into)?);
         Poll::Ready(Ok(res))
-        //}
     }
 }
 
@@ -335,7 +333,6 @@ impl NodeAsServer {
                             tokio::spawn(
                                 async move {
                                     if let Err(err) = Self::server_handshake(self.is_tls, handshake_codec.clone(), &mut stream).await {
-                                        //let _ = error_tx.send(err);
                                         println!("error {:?}", err);
                                         return;
                                     }
@@ -343,7 +340,6 @@ impl NodeAsServer {
                                     let (internal_tx, internal_rx) = unbounded_channel::<CtrlMsg>();
                                     let cx = ProcessContext::with_dispathcer(node_name, creation, dispatcher, internal_tx);
                                     let mut conn = Connection::new(&mut stream, cx, internal_rx);
-                                    //tokio::pin!(conn);
                                     loop {
                                         tokio::select! {
                                             res = &mut conn => {

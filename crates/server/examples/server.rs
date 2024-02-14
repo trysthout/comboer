@@ -76,6 +76,7 @@ impl Service<server::ProcessContext, CtrlMsg> for B {
 
 #[tokio::main]
 async fn main() {
-    let node = NodeAsServer::new("rust".to_string(), "aaa".to_string()).add_matcher(B);
-    node.listen("127.0.0.1:4369").await.unwrap();
+    let node =
+        NodeAsServer::new("rust".to_string(), "aaa".to_string(), "127.0.0.1:4369").add_matcher(B);
+    node.listen().await.unwrap();
 }
