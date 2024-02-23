@@ -8,7 +8,7 @@ use proto::{
 };
 use tokio::sync::mpsc::UnboundedSender;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Process {
     pid: term::NewPid,
     sender: UnboundedSender<CtrlMsg>,
