@@ -11,11 +11,12 @@ use tokio::sync::mpsc::UnboundedSender;
 #[derive(Debug)]
 pub struct Process {
     pid: term::NewPid,
+    sender: UnboundedSender<CtrlMsg>,
 }
 
 impl Process {
-    pub fn new(pid: term::NewPid) -> Self {
-        Self { pid }
+    pub fn new(pid: term::NewPid, sender: UnboundedSender<CtrlMsg>) -> Self {
+        Self { pid, sender }
     }
 
     pub fn get_pid(&self) -> term::NewPid {
@@ -24,6 +25,10 @@ impl Process {
 
     pub fn get_pid_ref(&self) -> &term::NewPid {
         &self.pid
+    }
+
+    pub fn send(&self, msg: CtrlMsg) {
+        let _ = self.sender.send(msg);
     }
 }
 
@@ -99,7 +104,7 @@ impl ProcessContext {
             creation: self.creation,
         };
 
-        Process::new(pid)
+        Process::new(pid, self.sender.clone())
     }
 
     /// create ref. refer to https://github.com/erlang/otp/blob/master/lib/erl_interface/src/connect/ei_connect.c#L745
