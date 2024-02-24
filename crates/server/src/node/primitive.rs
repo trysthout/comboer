@@ -1,4 +1,5 @@
 use std::{
+    fmt::Debug,
     net::{Ipv4Addr, SocketAddrV4},
     pin::Pin,
     task::{Context, Poll},
@@ -23,7 +24,7 @@ use crate::{node::get_short_hostname, Dispatcher, MatchId, ProcessContext};
 use super::Error;
 
 #[derive(Debug, Clone)]
-pub struct NodeAsClient {
+pub struct NodeAsClient<P> {
     pub is_tls: bool,
     pub handshaked: bool,
     pub node_name: String,
@@ -31,10 +32,13 @@ pub struct NodeAsClient {
     pub creation: u32,
     epmd_addr: &'static str,
     internal_tx: Option<UnboundedSender<CtrlMsg>>,
-    dispatcher: Dispatcher,
+    dispatcher: Dispatcher<P>,
 }
 
-impl NodeAsClient {
+impl<P> NodeAsClient<P>
+where
+    P: Debug + Clone,
+{
     pub fn new(node_name: String, cookie: String, epmd_addr: &'static str) -> Self {
         let creation = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
@@ -54,7 +58,7 @@ impl NodeAsClient {
 
     pub fn add_matcher<M>(self, matcher: M) -> Self
     where
-        M: Service<ProcessContext, CtrlMsg, Response = bool, Error = crate::Error>
+        M: Service<ProcessContext<P>, CtrlMsg, Response = bool, Error = crate::Error>
             + Clone
             + Send
             + Sync
@@ -77,7 +81,7 @@ impl NodeAsClient {
     pub async fn connect_local_by_name(
         mut self,
         remote_node_name: &str,
-    ) -> Result<Connection<TcpStream>, Error> {
+    ) -> Result<Connection<TcpStream, P>, Error> {
         let mut epmd_client = EpmdClient::new(self.epmd_addr).await?;
         let nodes = epmd_client.req_names().await?.nodes;
         let node = nodes
@@ -185,16 +189,16 @@ impl NodeAsClient {
 pub struct ServerConfig {}
 pin_project_lite::pin_project! {
     #[derive(Debug)]
-    pub struct Connection<T> {
+    pub struct Connection<T, P> {
         conn: T,
-        cx: ProcessContext,
+        cx: ProcessContext<P>,
         buf: Vec<u8>,
         rx: UnboundedReceiver<CtrlMsg>
     }
 }
 
-impl<T> Connection<T> {
-    pub fn new(conn: T, cx: ProcessContext, rx: UnboundedReceiver<CtrlMsg>) -> Self {
+impl<T, P> Connection<T, P> {
+    pub fn new(conn: T, cx: ProcessContext<P>, rx: UnboundedReceiver<CtrlMsg>) -> Self {
         Self {
             conn,
             cx,
@@ -203,14 +207,15 @@ impl<T> Connection<T> {
         }
     }
 
-    pub fn get_cx(&mut self) -> &mut ProcessContext {
+    pub fn get_cx(&mut self) -> &mut ProcessContext<P> {
         &mut self.cx
     }
 }
 
-impl<T> std::future::Future for Connection<T>
+impl<T, P> std::future::Future for Connection<T, P>
 where
     T: AsyncRead + AsyncWrite + Unpin,
+    P: Debug + Clone + Send,
 {
     type Output = Result<bool, crate::Error>;
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -228,9 +233,8 @@ where
         if let Err(err) = futures::ready!(r.poll(cx)) {
             if err.to_string().contains("early eof") {
                 return Poll::Pending;
-            } else {
-                return Poll::Ready(Err(err.into()));
             }
+            return Poll::Ready(Err(err.into()));
         }
 
         let length = BigEndian::read_u32(&me.buf[..4]) as usize;
@@ -254,17 +258,20 @@ where
 }
 
 #[derive(Debug)]
-pub struct NodeAsServer {
+pub struct NodeAsServer<P> {
     pub is_tls: bool,
     pub handshaked: bool,
     pub node_name: String,
     pub cookie: String,
     pub creation: u32,
     epmd_addr: &'static str,
-    dispatcher: Dispatcher,
+    dispatcher: Dispatcher<P>,
 }
 
-impl NodeAsServer {
+impl<P> NodeAsServer<P>
+where
+    P: Debug + Clone + Send + 'static,
+{
     pub fn new(node_name: String, cookie: String, epmd_addr: &'static str) -> Self {
         let creation = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
@@ -283,7 +290,7 @@ impl NodeAsServer {
 
     pub fn add_matcher<M>(self, matcher: M) -> Self
     where
-        M: Service<ProcessContext, CtrlMsg, Response = bool, Error = crate::Error>
+        M: Service<ProcessContext<P>, CtrlMsg, Response = bool, Error = crate::Error>
             + Clone
             + Send
             + Sync

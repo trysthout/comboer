@@ -1,17 +1,17 @@
 use motore::Service;
 use proto::{etf::term, RegSend};
 use proto::{Ctrl, CtrlMsg};
-use server::NodeAsClient;
+use server::{EmptyBoxCx, NodeAsClient, ProcessContext};
 
 #[derive(Clone)]
 struct A;
 
-impl Service<server::ProcessContext, CtrlMsg> for A {
+impl Service<ProcessContext<EmptyBoxCx>, CtrlMsg> for A {
     type Response = bool;
     type Error = server::Error;
     async fn call<'s, 'cx>(
         &'s self,
-        _cx: &'cx mut server::ProcessContext,
+        _cx: &'cx mut ProcessContext<EmptyBoxCx>,
         _req: CtrlMsg,
     ) -> Result<Self::Response, Self::Error> {
         Ok(true)

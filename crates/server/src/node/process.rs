@@ -1,4 +1,7 @@
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::{
+    fmt::Debug,
+    sync::atomic::{AtomicU32, AtomicU64, Ordering},
+};
 
 use dashmap::DashMap;
 use motore::{BoxCloneService, Service};
@@ -32,23 +35,29 @@ impl Process {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct EmptyBoxCx;
 static UNIQ_ID: AtomicU64 = AtomicU64::new(1);
 static PID_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone)]
-pub struct ProcessContext {
+pub struct ProcessContext<P> {
     node_name: String,
     creation: u32,
     sender: UnboundedSender<CtrlMsg>,
-    dispatcher: Dispatcher,
+    dispatcher: Dispatcher<P>,
     curr_match_id: MatchId,
+    box_cx: Option<P>,
 }
 
-impl ProcessContext {
+impl<P> ProcessContext<P>
+where
+    P: Debug + Clone,
+{
     pub fn with_dispathcer(
         node_name: String,
         creation: u32,
-        dispatcher: Dispatcher,
+        dispatcher: Dispatcher<P>,
         sender: UnboundedSender<CtrlMsg>,
     ) -> Self {
         Self {
@@ -57,6 +66,7 @@ impl ProcessContext {
             curr_match_id: MatchId(0),
             dispatcher,
             sender,
+            box_cx: None,
         }
     }
 
@@ -67,6 +77,7 @@ impl ProcessContext {
             curr_match_id: MatchId(0),
             dispatcher: Dispatcher::new(),
             sender,
+            box_cx: None,
         }
     }
 
@@ -74,13 +85,13 @@ impl ProcessContext {
         let _ = self.sender.send(ctrl_msg);
     }
 
-    pub fn get_matcher(&self) -> Dispatcher {
+    pub fn get_matcher(&self) -> Dispatcher<P> {
         self.dispatcher.clone()
     }
 
     pub fn add_matcher<M>(&mut self, matcher: M) -> &mut Self
     where
-        M: Service<ProcessContext, CtrlMsg, Response = bool, Error = crate::Error>
+        M: Service<ProcessContext<P>, CtrlMsg, Response = bool, Error = crate::Error>
             + Clone
             + Send
             + Sync
@@ -121,14 +132,29 @@ impl ProcessContext {
             ],
         }
     }
+
+    pub fn set_box_cx(&mut self, cx: P) {
+        self.box_cx = Some(cx)
+    }
+
+    pub fn get_box_cx(&self) -> Option<&P> {
+        self.box_cx.as_ref()
+    }
+
+    pub fn get_mut_box_cx(&mut self) -> Option<&mut P> {
+        self.box_cx.as_mut()
+    }
 }
 
-impl Service<ProcessContext, CtrlMsg> for ProcessContext {
+impl<P> Service<ProcessContext<P>, CtrlMsg> for ProcessContext<P>
+where
+    P: Debug + Clone + Send + Sync,
+{
     type Response = bool;
     type Error = crate::Error;
     async fn call<'s, 'cx>(
         &'s self,
-        cx: &'cx mut ProcessContext,
+        cx: &'cx mut ProcessContext<P>,
         req: CtrlMsg,
     ) -> Result<Self::Response, Self::Error> {
         self.dispatcher.call(cx, req).await
@@ -147,17 +173,17 @@ impl MatchId {
 }
 
 #[derive(Debug, Clone)]
-pub struct Dispatcher {
-    matchers: DashMap<MatchId, BoxCloneService<ProcessContext, CtrlMsg, bool, crate::Error>>,
+pub struct Dispatcher<P> {
+    matchers: DashMap<MatchId, BoxCloneService<ProcessContext<P>, CtrlMsg, bool, crate::Error>>,
 }
 
-impl Default for Dispatcher {
+impl<P> Default for Dispatcher<P> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Dispatcher {
+impl<P> Dispatcher<P> {
     pub fn new() -> Self {
         Self {
             matchers: DashMap::new(),
@@ -166,7 +192,7 @@ impl Dispatcher {
 
     pub fn add_matcher<M>(&self, matcher_id: MatchId, matcher: M)
     where
-        M: Service<ProcessContext, CtrlMsg, Response = bool, Error = crate::Error>
+        M: Service<ProcessContext<P>, CtrlMsg, Response = bool, Error = crate::Error>
             + Send
             + Sync
             + Clone
@@ -177,12 +203,15 @@ impl Dispatcher {
     }
 }
 
-impl Service<ProcessContext, CtrlMsg> for Dispatcher {
+impl<P> Service<ProcessContext<P>, CtrlMsg> for Dispatcher<P>
+where
+    P: Debug + Clone + Send,
+{
     type Response = bool;
     type Error = crate::Error;
     async fn call<'s, 'cx>(
         &'s self,
-        cx: &'cx mut ProcessContext,
+        cx: &'cx mut ProcessContext<P>,
         req: CtrlMsg,
     ) -> Result<Self::Response, Self::Error> {
         for matcher in self.matchers.iter() {
