@@ -901,36 +901,6 @@ impl ProcessKind for Ctrl {
 }
 
 #[derive(Debug, Clone)]
-pub struct CtrlMsgGeneric<C> {
-    pub ctrl: C,
-    pub msg: Option<Term>,
-}
-
-impl<C> TryFrom<&[u8]> for CtrlMsgGeneric<C>
-where
-    C: for<'a> TryFrom<&'a [u8], Error = anyhow::Error> + Len,
-{
-    type Error = anyhow::Error;
-    fn try_from(mut value: &[u8]) -> Result<Self, Self::Error> {
-        // 112
-        value.get_u8();
-        // 131
-        value.get_u8();
-        let ctrl = C::try_from(value)?;
-        value.advance(ctrl.len());
-        let msg = (!value.is_empty()).then(|| {
-            // 131
-            value.get_u8();
-            let term = Term::from(value);
-            value.advance(term.len());
-            term
-        });
-
-        Ok(Self { ctrl, msg })
-    }
-}
-
-#[derive(Debug, Clone)]
 pub struct CtrlMsg {
     pub ctrl: Ctrl,
     pub msg: Option<Term>,
