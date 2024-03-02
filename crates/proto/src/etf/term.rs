@@ -137,6 +137,18 @@ impl Len for SmallAtomUtf8 {
     }
 }
 
+impl From<&str> for SmallAtomUtf8 {
+    fn from(value: &str) -> Self {
+        Self(value.to_string())
+    }
+}
+
+impl From<String> for SmallAtomUtf8 {
+   fn from(value: String) -> Self {
+      Self(value) 
+   } 
+}
+
 ///
 /// 1    N      4   4       1
 /// 103  Node   ID  Serial  Creation
