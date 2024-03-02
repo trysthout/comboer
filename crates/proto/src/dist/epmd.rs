@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::SystemTime};
+use std::{fmt::Debug, sync::Arc, time::SystemTime};
 
 use byteorder::{BigEndian, ByteOrder};
 use bytes::{Buf, BufMut};
@@ -137,6 +137,7 @@ impl EpmdClient {
                     name: String::from_utf8_lossy(name).to_string(),
                     port: String::from_utf8_lossy(port).parse::<u16>().unwrap(),
                 });
+                
             }
         }
 
@@ -180,14 +181,15 @@ pub struct EpmdServer {
 }
 
 impl EpmdServer {
-    pub async fn new() -> EpmdServer {
+    pub fn new() -> Self {
         Self {
             nodes: Arc::new(DashMap::new()),
         }
     }
 
-    pub async fn accept<T: ToSocketAddrs>(&mut self, addr: T) -> Result<(), anyhow::Error> {
-        let listener = TcpListener::bind(addr).await?;
+    pub async fn accept<T: ToSocketAddrs + Debug>(&mut self, addr: T) -> Result<(), anyhow::Error> {
+        let listener = TcpListener::bind(&addr).await?;
+        println!("epmd server start, listening {:?}", &addr);
         let me = &mut self.clone();
         loop {
             let (stream, _) = listener.accept().await?;
@@ -206,20 +208,19 @@ impl EpmdServer {
         stream.read_exact(&mut buf[..length]).await?;
         match buf[0] {
             ALIVE2_REQ => {
-                self.decode_alive_req(&buf);
-                let n = self.encode_alive_x_resp(&mut buf[0..]);
+                self.decode_alive_req(&buf[..length]);
+                let n = self.encode_alive_x_resp(&mut buf);
                 stream.write_all(&buf[..n]).await?;
-                Ok(())
             }
 
             NAMES_REQ => {
-                let n = self.encode_names_resp(&mut buf[0..]);
+                let n = self.encode_names_resp(&mut buf);
                 stream.write_all(&buf[..n]).await?;
-                Ok(())
             }
 
-            x => Err(anyhow::anyhow!("Unsupported tag, got: {}", x)),
+            x => return Err(anyhow::anyhow!("Unsupported tag, got: {}", x)),
         }
+        Ok(())
     }
 
     fn decode_alive_req(&mut self, mut buf: &[u8]) {
@@ -271,12 +272,12 @@ impl EpmdServer {
     fn encode_names_resp(&self, mut buf: &mut [u8]) -> usize {
         // Default port is 4369
         // TODO: port as a parameter
-        buf.put_u32(4369);
+        buf.put_u32(9000);
 
-        let mut length = 1;
+        let mut length = 4;
         for node in self.nodes.iter() {
             // The format is: io:format("name ~ts at port ~p~n", [NodeName, Port]).
-            let s = format!("name {} at port {}\n", node.key(), node.port_no);
+            let s = format!("name {} at port {}\n", node.key(), node.value().port_no);
             buf.put_slice(s.as_bytes());
             length += s.len();
         }
