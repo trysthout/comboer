@@ -100,7 +100,7 @@ where
         let (internal_tx, internal_rx) = unbounded_channel::<CtrlMsg>();
         self.internal_tx = Some(internal_tx.clone());
 
-        let cx = ProcessContext::with_dispathcer(
+        let cx = ProcessContext::with_dispatcher(
             self.node_name.clone(),
             self.creation,
             self.dispatcher.clone(),
@@ -345,7 +345,7 @@ where
                                     }
 
                                     let (internal_tx, internal_rx) = unbounded_channel::<CtrlMsg>();
-                                    let cx = ProcessContext::with_dispathcer(node_name, creation, dispatcher, internal_tx);
+                                    let cx = ProcessContext::with_dispatcher(node_name, creation, dispatcher, internal_tx);
                                     let mut conn = Connection::new(&mut stream, cx, internal_rx);
                                     loop {
                                         tokio::select! {

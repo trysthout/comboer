@@ -54,7 +54,7 @@ impl<P> ProcessContext<P>
 where
     P: Debug + Clone,
 {
-    pub fn with_dispathcer(
+    pub fn with_dispatcher(
         node_name: String,
         creation: u32,
         dispatcher: Dispatcher<P>,
