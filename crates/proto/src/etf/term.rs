@@ -4,7 +4,7 @@ use num_bigint::BigInt;
 
 use super::*;
 
-trait TermTag {
+pub trait TermTag {
     const TAG: u8;
 }
 //#[derive(Debug, Clone)]
@@ -1343,8 +1343,23 @@ impl From<&PidOrAtom> for PidOrAtom {
     }
 }
 
-macro_rules! impl_from_into_term {
+macro_rules! impl_from_into {
     ($($t:ident),+) => {
+        $(
+            impl TermFromSlice for $t {
+                type Error = anyhow::Error;
+                fn from_slice<T: AsRef<[u8]>>(value: T) -> Result<Self, Self::Error> {
+                    let value = value.as_ref();
+                    let tag = value[0];
+                    if tag != Self::TAG {
+                        return Err(anyhow::anyhow!("Invalid term tag, expected: {:?}, real: {:?}", Self::TAG, tag));
+                    }
+
+                    Ok(Self::from(value))
+                }
+            }
+        )+
+
         #[derive(Debug, Clone, PartialEq)]
         pub enum Term {
             $($t($t),)+
@@ -1417,7 +1432,7 @@ macro_rules! impl_from_into_term {
     };
 }
 
-impl_from_into_term!(
+impl_from_into!(
     SmallInteger,
     Integer,
     SmallAtomUtf8,
@@ -1479,7 +1494,7 @@ mod test {
         let mut enc = vec![];
         s.encode(&mut enc).unwrap();
         println!("{:?}", &enc[..]);
-        let de = SmallTuple::from(&enc[..]);
+        let de = SmallTuple::from_slice(&enc[..]);
         println!("{:?}", de);
     }
 

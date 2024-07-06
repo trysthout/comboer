@@ -1,43 +1,42 @@
 use std::{
     fmt::Debug,
     net::{Ipv4Addr, SocketAddrV4},
-    pin::Pin,
-    task::{Context, Poll},
     time::SystemTime,
 };
 
 use byteorder::{BigEndian, ByteOrder};
-
 use motore::Service;
-use proto::{
-    handshake::{HandshakeCodec, HandshakeVersion, Status},
-    CtrlMsg, Encoder, EpmdClient, Len,
-};
 use tokio::{
-    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
+    io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
-    sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
 };
 
-use crate::{node::get_short_hostname, Dispatcher, MatchId, ProcessContext};
+use proto::{
+    EpmdClient,
+    handshake::{HandshakeCodec, HandshakeVersion, Status},
+};
+
+use crate::{
+    Dispatcher, MatchId, node::get_short_hostname, ProcessContext, RawMsg, Request, Response,
+};
+use crate::node::conn::Connection;
 
 use super::Error;
 
 #[derive(Debug, Clone)]
-pub struct NodeAsClient<P> {
+pub struct NodeAsClient<C> {
     pub is_tls: bool,
-    pub handshaked: bool,
     pub node_name: String,
     pub cookie: String,
     pub creation: u32,
     epmd_addr: &'static str,
-    internal_tx: Option<UnboundedSender<CtrlMsg>>,
-    dispatcher: Dispatcher<P>,
+    // internal_tx: Option<UnboundedSender<CtrlMsg>>,
+    dispatcher: Dispatcher<C, Vec<u8>>,
 }
 
-impl<P> NodeAsClient<P>
+impl<C> NodeAsClient<C>
 where
-    P: Debug + Clone,
+    C: Clone + Debug + Sync + Send,
 {
     pub fn new(node_name: String, cookie: String, epmd_addr: &'static str) -> Self {
         let creation = SystemTime::now()
@@ -48,9 +47,8 @@ where
             node_name,
             cookie,
             creation,
-            handshaked: false,
             is_tls: false,
-            internal_tx: None,
+            // internal_tx: None,
             dispatcher: Dispatcher::new(),
             epmd_addr,
         }
@@ -58,7 +56,7 @@ where
 
     pub fn add_matcher<M>(self, matcher: M) -> Self
     where
-        M: Service<ProcessContext<P>, CtrlMsg, Response = bool, Error = crate::Error>
+        M: Service<ProcessContext<C>, Request<Vec<u8>>, Response = Response<RawMsg>, Error = Error>
             + Clone
             + Send
             + Sync
@@ -68,20 +66,19 @@ where
         self.dispatcher.add_matcher(matcher_id, matcher);
         Self {
             is_tls: self.is_tls,
-            handshaked: self.handshaked,
             node_name: self.node_name,
             cookie: self.cookie,
             creation: self.creation,
-            internal_tx: self.internal_tx,
+            // internal_tx: self.internal_tx,
             dispatcher: self.dispatcher,
             epmd_addr: self.epmd_addr,
         }
     }
 
     pub async fn connect_local_by_name(
-        mut self,
+        self,
         remote_node_name: &str,
-    ) -> Result<Connection<TcpStream, P>, Error> {
+    ) -> Result<Connection<TcpStream, C>, Error> {
         let mut epmd_client = EpmdClient::new(self.epmd_addr).await?;
         let nodes = epmd_client.req_names().await?.nodes;
         let node = nodes
@@ -96,22 +93,22 @@ where
         let mut stream = TcpStream::connect(addr).await.unwrap();
         let _ = stream.set_nodelay(true);
         let handshake_codec = HandshakeCodec::new(self.node_name.clone(), self.cookie.clone());
-        self.client_handshake(handshake_codec, &mut stream).await?;
-        let (internal_tx, internal_rx) = unbounded_channel::<CtrlMsg>();
-        self.internal_tx = Some(internal_tx.clone());
+        let _ = self.client_handshake(handshake_codec, &mut stream).await?;
+        // let (internal_tx, internal_rx) = unbounded_channel::<CtrlMsg>();
+        // self.internal_tx = Some(internal_tx.clone());
 
         let cx = ProcessContext::with_dispatcher(
             self.node_name.clone(),
             self.creation,
             self.dispatcher.clone(),
-            internal_tx,
         );
-        let conn = Connection::new(stream, cx, internal_rx);
+
+        let conn = Connection::new(stream, cx.clone());
         Ok(conn)
     }
 
     async fn client_handshake(
-        &mut self,
+        &self,
         mut handshake_codec: HandshakeCodec,
         stream: &mut TcpStream,
     ) -> Result<(), Error> {
@@ -119,7 +116,7 @@ where
         let n = handshake_codec.encode_v6_name(&mut &mut buf[..]);
         stream.write_all(&buf[..n]).await?;
 
-        let header_length = header_length(self.is_tls, self.handshaked);
+        let header_length = header_length(self.is_tls);
 
         loop {
             stream.read_exact(&mut buf[0..header_length]).await?;
@@ -167,110 +164,30 @@ where
                     if !is_valid {
                         return Err(Error::HandshakeFailed("incorrect digest".to_string()));
                     }
-                    self.handshaked = true;
                     return Ok(());
                 }
                 x => return Err(Error::UnsupportedTag(x)),
             }
         }
     }
-
-    pub async fn send(&mut self, dist: CtrlMsg) -> Result<(), Error> {
-        self.internal_tx
-            .as_mut()
-            .unwrap()
-            .send(dist)
-            .map_err(Error::ChannelSendError)?;
-        Ok(())
-    }
 }
 
 #[derive(Debug)]
 pub struct ServerConfig {}
-pin_project_lite::pin_project! {
-    #[derive(Debug)]
-    pub struct Connection<T, P> {
-        conn: T,
-        cx: ProcessContext<P>,
-        buf: Vec<u8>,
-        rx: UnboundedReceiver<CtrlMsg>
-    }
-}
-
-impl<T, P> Connection<T, P> {
-    pub fn new(conn: T, cx: ProcessContext<P>, rx: UnboundedReceiver<CtrlMsg>) -> Self {
-        Self {
-            conn,
-            cx,
-            buf: vec![0; 1024],
-            rx,
-        }
-    }
-
-    pub fn get_cx(&mut self) -> &mut ProcessContext<P> {
-        &mut self.cx
-    }
-}
-
-impl<T, P> std::future::Future for Connection<T, P>
-where
-    T: AsyncRead + AsyncWrite + Unpin,
-    P: Debug + Clone + Send,
-{
-    type Output = Result<bool, crate::Error>;
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let me = self.project();
-        let dispatcher = me.cx.get_matcher();
-        if let Poll::Ready(Some(msg)) = me.rx.poll_recv(cx) {
-            let mut buf = Vec::with_capacity(4 + msg.len());
-            let _ = msg.encode(&mut buf);
-            let mut fut = std::pin::pin!(me.conn.write_all(&buf));
-            futures::ready!(fut.as_mut().poll(cx)?);
-            return Poll::Ready(Ok(false));
-        }
-
-        let r = std::pin::pin!(me.conn.read_exact(&mut me.buf[..4]));
-        if let Err(err) = futures::ready!(r.poll(cx)) {
-            if err.to_string().contains("early eof") {
-                return Poll::Pending;
-            }
-            return Poll::Ready(Err(err.into()));
-        }
-
-        let length = BigEndian::read_u32(&me.buf[..4]) as usize;
-        // Erlang Tick
-        if length == 0 {
-            futures::ready!(Pin::new(&mut *me.conn).poll_write(cx, &[0, 0, 0, 0])?);
-            return Poll::Ready(Ok(false));
-        }
-
-        if length > me.buf.len() {
-            me.buf.resize(length, 0)
-        }
-
-        let r = std::pin::pin!(me.conn.read_exact(&mut me.buf[..length]));
-        let _ = futures::ready!(r.poll(cx)?);
-        let req = CtrlMsg::try_from(&me.buf[..length])?;
-        let mut fut = std::pin::pin!(dispatcher.call(me.cx, req));
-        let res = futures::ready!(fut.as_mut().poll(cx).map_err(Into::<crate::Error>::into)?);
-        Poll::Ready(Ok(res))
-    }
-}
 
 #[derive(Debug)]
-pub struct NodeAsServer<P> {
+pub struct NodeAsServer<C> {
     pub is_tls: bool,
-    pub handshaked: bool,
     pub node_name: String,
     pub cookie: String,
     pub creation: u32,
     epmd_addr: &'static str,
-    dispatcher: Dispatcher<P>,
+    dispatcher: Dispatcher<C>,
 }
 
-impl<P> NodeAsServer<P>
+impl<C> NodeAsServer<C>
 where
-    P: Debug + Clone + Send + 'static,
+    C: Debug + Clone + Send + Sync + 'static,
 {
     pub fn new(node_name: String, cookie: String, epmd_addr: &'static str) -> Self {
         let creation = SystemTime::now()
@@ -281,7 +198,6 @@ where
             node_name,
             cookie,
             creation,
-            handshaked: false,
             is_tls: false,
             dispatcher: Dispatcher::new(),
             epmd_addr,
@@ -290,8 +206,12 @@ where
 
     pub fn add_matcher<M>(self, matcher: M) -> Self
     where
-        M: Service<ProcessContext<P>, CtrlMsg, Response = bool, Error = crate::Error>
-            + Clone
+        M: Service<
+                ProcessContext<C>,
+                Request<Vec<u8>>,
+                Response = Response<RawMsg>,
+                Error = crate::Error,
+            > + Clone
             + Send
             + Sync
             + 'static,
@@ -303,7 +223,6 @@ where
             cookie: self.cookie,
             creation: self.creation,
             is_tls: self.is_tls,
-            handshaked: self.handshaked,
             dispatcher: self.dispatcher,
             epmd_addr: self.epmd_addr,
         }
@@ -344,18 +263,9 @@ where
                                         return;
                                     }
 
-                                    let (internal_tx, internal_rx) = unbounded_channel::<CtrlMsg>();
-                                    let cx = ProcessContext::with_dispatcher(node_name, creation, dispatcher, internal_tx);
-                                    let mut conn = Connection::new(&mut stream, cx, internal_rx);
-                                    loop {
-                                        tokio::select! {
-                                            res = &mut conn => {
-                                                if let Err(err) = res {
-                                                    println!("error {:?}", err);
-                                                }
-                                            }
-                                        }
-                                    }
+                                    let cx = ProcessContext::with_dispatcher(node_name, creation, dispatcher);
+                                    let mut conn = Connection::new(&mut stream, cx);
+                                    let _ = conn.serving().await;
                                 }
                             );
                         },
@@ -418,12 +328,12 @@ where
                     handshake_codec.decode_complement(&buf[..length]);
                 }
                 b'r' => {
-                    if handshake_codec.decode_challenge_reply(&buf[..length]) {
+                    return if handshake_codec.decode_challenge_reply(&buf[..length]) {
                         let n = handshake_codec.encode_challenge_ack(&mut &mut buf[..]);
                         stream.write_all(&buf[..n]).await?;
-                        return Ok(());
+                        Ok(())
                     } else {
-                        return Err(Error::HandshakeFailed("invalid reply".to_string()));
+                        Err(Error::HandshakeFailed("invalid reply".to_string()))
                     }
                 }
                 x => return Err(Error::UnsupportedTag(x)),
@@ -433,7 +343,7 @@ where
 }
 
 #[inline]
-fn header_length(is_tls: bool, _handshaked: bool) -> usize {
+fn header_length(is_tls: bool) -> usize {
     if is_tls {
         4
     } else {

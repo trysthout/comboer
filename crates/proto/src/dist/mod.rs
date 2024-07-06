@@ -103,6 +103,12 @@ pub trait ProcessKind {
     fn get_to_pid_atom(&self) -> Option<PidOrAtom>;
 }
 
+pub trait CtrlFromSlice: Sized {
+    type Error;
+    fn from_slice<T: AsRef<[u8]>>(slice: T) -> Result<Self, Self::Error>;
+}
+
+
 pub mod ctrl;
 pub use ctrl::*;
 pub mod epmd;

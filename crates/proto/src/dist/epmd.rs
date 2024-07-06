@@ -83,8 +83,6 @@ pub struct RegisterNodeResp {
 // A node unregisters itself from the EPMD by closing the TCP connection to EPMD established when the node was registered.
 pub struct UnregisterNode;
 
-pub struct GetDistPortReq(Vec<u8>);
-
 pub struct GetDistPortResp {
     pub result: u8,
     pub info: Option<RegisterNodeReq>,
@@ -137,7 +135,6 @@ impl EpmdClient {
                     name: String::from_utf8_lossy(name).to_string(),
                     port: String::from_utf8_lossy(port).parse::<u16>().unwrap(),
                 });
-                
             }
         }
 

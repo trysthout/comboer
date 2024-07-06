@@ -9,9 +9,10 @@ defmodule Server do
         Process.send(pid, :hi, [])
         IO.inspect(:call)
         loop()
-      msg ->
-        Process.unregister(:ss)
+      {msg, pid} ->
+        # Process.unregister(:ss)
         IO.inspect(msg)
+        Process.send(pid, :ack, [])
     end
   end
 end

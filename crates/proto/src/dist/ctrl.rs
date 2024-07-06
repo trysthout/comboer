@@ -1,6 +1,10 @@
+use std::io::Write;
+
 use bytes::Buf;
 
-use crate::{dist::OpCode, etf::term::*, Encoder, Len, ProcessKind};
+use crate::{
+    CtrlFromSlice, dist::OpCode, Encoder, etf::term::*, Len, ProcessKind, term, TermFromSlice,
+};
 
 macro_rules! define_ctrl {
     (
@@ -13,6 +17,11 @@ macro_rules! define_ctrl {
         }
 
         impl OpCode for $sn {
+            const CODE: u8 = $op;
+            const ARITY: u8 = $num;
+        }
+
+        impl OpCode for &$sn {
             const CODE: u8 = $op;
             const ARITY: u8 = $num;
         }
@@ -34,6 +43,17 @@ macro_rules! define_ctrl {
 
                 Self {
                     $( $f, )*
+                }
+            }
+        }
+
+        impl CtrlFromSlice for $sn {
+            type Error = anyhow::Error;
+            fn from_slice<T: AsRef<[u8]>>(value: T) -> Result<Self, Self::Error> {
+                let value = value.as_ref();
+                match value[3] {
+                    Self::CODE  => Ok(Self::from(value)),
+                    x => Err(anyhow::anyhow!("invalid tag, expected tag: {}, real tag: {}", Self::CODE, x))
                 }
             }
         }
@@ -62,7 +82,26 @@ macro_rules! define_ctrl {
                total
             }
        }
+        impl Len for &$sn {
+            fn len(&self) -> usize {
+               #[allow(unused_mut)]
+               // SmallInteger length, SmallTuple includes tag and arity length
+               let mut total = 2 + 2;
+               $(total += self.$f.len();)*
+               total
+            }
+       }
     };
+}
+
+impl<T> Encoder for &T
+where
+    T: Encoder<Error = anyhow::Error>,
+{
+    type Error = anyhow::Error;
+    fn encode<W: Write>(&self, w: &mut W) -> Result<(), Self::Error> {
+        <T as Encoder>::encode(self, w)
+    }
 }
 
 macro_rules! impl_process {
@@ -468,7 +507,7 @@ PAYLOAD_MONITOR_P_EXIT
 Followed by Reason.
 
 This control message replaces the MONITOR_P_EXIT control message and will be sent when the distribution flag DFLAG_EXIT_PAYLOAD has been negotiated in the connection setup handshake.
-    
+
     "]
     PayloadMonitorPExit {
         from_proc: PidOrAtom,
@@ -754,7 +793,7 @@ macro_rules! impl_ctrl {
                 type Error = anyhow::Error;
                 fn try_from(value: Ctrl) -> Result<Self, Self::Error> {
                     if let Ctrl::$t(v) = value {
-                        Ok(v)
+                        Ok(v.clone())
                     } else {
                         Err(anyhow::anyhow!("cannot convert value type"))
                     }
@@ -901,18 +940,22 @@ impl ProcessKind for Ctrl {
 }
 
 #[derive(Debug, Clone)]
-pub struct CtrlMsg {
-    pub ctrl: Ctrl,
-    pub msg: Option<Term>,
+pub struct CtrlMsg<T, U> {
+    pub ctrl: T,
+    pub msg: Option<U>,
 }
 
-impl CtrlMsg {
-    pub fn new(ctrl: Ctrl, msg: Option<Term>) -> Self {
+impl<T, U> CtrlMsg<T, U> {
+    pub fn new(ctrl: T, msg: Option<U>) -> Self {
         Self { ctrl, msg }
     }
 }
 
-impl Encoder for CtrlMsg {
+impl<T, U> Encoder for CtrlMsg<T, U>
+where
+    T: Encoder<Error = anyhow::Error> + Len + Send + Sync,
+    U: Encoder<Error = anyhow::Error> + Len + Send + Sync,
+{
     type Error = anyhow::Error;
     fn encode<W: std::io::Write>(&self, w: &mut W) -> Result<(), Self::Error> {
         w.write_all(&(self.len() as u32).to_be_bytes())?;
@@ -928,30 +971,113 @@ impl Encoder for CtrlMsg {
     }
 }
 
-impl TryFrom<&[u8]> for CtrlMsg {
+impl<T, U> Encoder for Option<CtrlMsg<T, U>>
+where
+    T: Encoder<Error = anyhow::Error> + Len + Send + Sync,
+    U: Encoder<Error = anyhow::Error> + Len + Send + Sync,
+{
+    type Error = anyhow::Error;
+    fn encode<W: Write>(&self, w: &mut W) -> Result<(), Self::Error> {
+        if self.is_none() {
+            return Ok(());
+        }
+
+        self.as_ref().unwrap().encode(w)?;
+        Ok(())
+    }
+}
+
+impl<T, U> TryFrom<&[u8]> for CtrlMsg<T, U>
+where
+    T: CtrlFromSlice<Error = anyhow::Error> + Len,
+    U: TermFromSlice<Error = anyhow::Error> + Len,
+{
     type Error = anyhow::Error;
     fn try_from(mut value: &[u8]) -> Result<Self, Self::Error> {
         // 112
         value.get_u8();
         // 131
         value.get_u8();
-        let ctrl = Ctrl::try_from(value)?;
+        let ctrl = T::from_slice(value)?;
         value.advance(ctrl.len());
-        let msg = (!value.is_empty()).then(|| {
-            // 131
-            value.get_u8();
-            let term = Term::from(value);
-            value.advance(term.len());
-            term
-        });
 
-        Ok(Self { ctrl, msg })
+        let msg = match value.is_empty() {
+            true => U::from_slice(&[term::Nil::TAG])?,
+            false => {
+                // 131
+                value.get_u8();
+                let term = U::from_slice(value)?;
+                value.advance(term.len());
+                term
+            }
+        };
+
+        Ok(Self {
+            ctrl,
+            msg: Some(msg),
+        })
     }
 }
 
-impl Len for CtrlMsg {
+impl<T, U> Len for CtrlMsg<T, U>
+where
+    T: Len,
+    U: Len,
+{
     fn len(&self) -> usize {
+        // 2 + self.ctrl.len() + self.msg.len()
         2 + self.ctrl.len() + self.msg.as_ref().map(|t| 1 + t.len()).unwrap_or_default()
+    }
+}
+
+impl<T, U> Len for Option<CtrlMsg<T, U>>
+where
+    T: Len,
+    U: Len,
+{
+    fn len(&self) -> usize {
+        match self {
+            None => 0,
+            Some(c) => c.len(),
+        }
+    }
+}
+
+//pub struct CtrlMsgInto<C, T> {
+//    pub ctrl: C,
+//    pub msg: T
+//}
+#[derive(Debug, Clone)]
+pub struct CtrlMsgInto<C, T> {
+    pub ctrl: C,
+    pub msg: T,
+}
+
+impl<C, T> TryFrom<&[u8]> for CtrlMsgInto<C, T>
+where
+    C: CtrlFromSlice<Error = anyhow::Error> + Len,
+    T: TermFromSlice<Error = anyhow::Error> + Len,
+{
+    type Error = anyhow::Error;
+    fn try_from(mut value: &[u8]) -> Result<Self, Self::Error> {
+        // 112
+        value.get_u8();
+        // 131
+        value.get_u8();
+        let ctrl = C::from_slice(value)?;
+        value.advance(ctrl.len());
+        let msg = match value.is_empty() {
+            true => T::from_slice(&[term::Nil::TAG])?,
+            false => {
+                // 131
+                value.get_u8();
+                let term = T::from_slice(value)?;
+                value.advance(term.len());
+                term
+            }
+        };
+
+        Ok(Self { ctrl, msg })
     }
 }
 

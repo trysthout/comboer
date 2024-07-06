@@ -1,70 +1,95 @@
+use std::sync::Arc;
+
 use motore::Service;
-use proto::{etf::term, RegSend};
-use proto::{Ctrl, CtrlMsg};
-use server::{EmptyBoxCx, NodeAsClient, ProcessContext};
+use tokio::sync::mpsc::UnboundedSender;
 
-#[derive(Clone)]
-struct A;
+use proto::{CtrlMsgInto, Encoder, etf::term, RegSend, SendSender};
+use proto::CtrlMsg;
+use proto::term::{SmallAtomUtf8, SmallTuple};
+use server::{BoxStream, NodeAsClient, Process, ProcessContext, Request, Response, ServiceBuilder};
 
-impl Service<ProcessContext<EmptyBoxCx>, CtrlMsg> for A {
-    type Response = bool;
+struct A {
+    sender: UnboundedSender<Vec<u8>>,
+}
+
+#[derive(Debug, Clone)]
+struct BoxCx {
+    from: Process,
+    ctrl: RegSend,
+}
+
+impl Service<ProcessContext<BoxCx>, Request<CtrlMsgInto<SendSender, SmallAtomUtf8>>> for A {
+    type Response = Response<Option<BoxStream<'static, CtrlMsg<RegSend, term::Nil>>>>;
     type Error = server::Error;
     async fn call<'s, 'cx>(
         &'s self,
-        _cx: &'cx mut ProcessContext<EmptyBoxCx>,
-        _req: CtrlMsg,
+        cx: &'cx mut ProcessContext<BoxCx>,
+        req: Request<CtrlMsgInto<SendSender, SmallAtomUtf8>>,
     ) -> Result<Self::Response, Self::Error> {
-        Ok(true)
+        println!("req {:?}", req.get_msg());
+        if req.get_msg().msg == SmallAtomUtf8("hi".to_string()) {
+            let box_cx = cx.get_box_cx().unwrap();
+            let ctrl = &box_cx.ctrl;
+            let from = &box_cx.from;
+            let msg = SmallTuple {
+                arity: 2,
+                elems: vec![
+                    SmallAtomUtf8("i am rust client".to_string()).into(),
+                    from.get_pid().into(),
+                ],
+            };
+
+            let mut buf = Vec::new();
+            let _ = CtrlMsg::new(ctrl, Some(msg)).encode(&mut buf);
+            let _ = self.sender.send(buf);
+        }
+        Ok(Response::new(None))
     }
 }
 
 #[tokio::main]
-async fn main() -> Result<(), anyhow::Error> {
-    let node = NodeAsClient::new(
+async fn main() -> Result<(), server::Error> {
+    let mut conn = NodeAsClient::new(
         "rust@fedora".to_string(),
         "aaa".to_string(),
         "127.0.0.1:4369",
     )
-    .add_matcher(A);
-    let mut conn = node.connect_local_by_name("a").await?;
+    .connect_local_by_name("a")
+    .await?;
+
+    let sender = conn.get_sender();
+    conn.get_cx()
+        .add_matcher(ServiceBuilder::new(Arc::new(A { sender })).build());
 
     let process = conn.get_cx().make_process();
     let from = process.get_pid();
 
-    let ctrl: Ctrl = RegSend {
+    let ctrl = RegSend {
         from: from.clone(),
-        unused: term::SmallAtomUtf8("".to_string()),
-        to_name: term::SmallAtomUtf8("ss".to_string()),
-    }
-    .into();
+        unused: SmallAtomUtf8("".to_string()),
+        to_name: SmallAtomUtf8("ss".to_string()),
+    };
 
-    let msg: term::Term = term::SmallTuple {
+    let msg: term::Term = SmallTuple {
         arity: 2,
         elems: vec![
-            term::SmallAtomUtf8("call".to_string()).into(),
+            SmallAtomUtf8("call".to_string()).into(),
             from.clone().into(),
         ],
     }
     .into();
 
-    conn.get_cx().send(CtrlMsg::new(ctrl.clone(), Some(msg)));
+    let _ = conn.send_req_data(CtrlMsg::new(&ctrl, Some(msg))).await?;
+    conn.get_cx().set_box_cx(BoxCx {
+        from: process,
+        ctrl: ctrl.clone(),
+    });
 
-    let msg: term::Term = term::SmallTuple {
-        arity: 2,
-        elems: vec![
-            term::SmallAtomUtf8("from rust client".to_string()).into(),
-            from.clone().into(),
-        ],
-    }
-    .into();
-    conn.get_cx().send(CtrlMsg::new(ctrl, Some(msg)));
+    //let resp = conn.receive_resp_data::<SendSender, SmallTuple>().await?;
+    //println!("receive resp {:?}", resp);
 
-    loop {
-        tokio::select! {
-            res = &mut conn => {
-                println!("result {:?}", res)
+    // let _ = conn.send_req_data(CtrlMsg::new(ctrl, Some(msg))).await?;
+    let _ = conn.serving().await?;
 
-            }
-        }
-    }
+    Ok(())
 }

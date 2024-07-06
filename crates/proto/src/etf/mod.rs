@@ -73,6 +73,11 @@ impl From<&Sign> for num_bigint::Sign {
     }
 }
 
+pub trait TermFromSlice: Sized {
+    type Error;
+    fn from_slice<T: AsRef<[u8]>>(slice: T) -> Result<Self, Self::Error>;
+}
+
 mod error;
 mod ser;
 pub use ser::{to_term, Serializer};

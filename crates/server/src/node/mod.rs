@@ -1,11 +1,18 @@
+use std::pin::Pin;
+use std::sync::Arc;
+use std::task::{Context, Poll};
+
+use futures_core::Stream;
+use futures_util::stream;
+use tokio::sync::mpsc::error::TryRecvError;
+
+pub use primitive::*;
+pub use process::*;
 use proto::*;
 
+mod conn;
 pub mod primitive;
-pub use primitive::*;
 pub mod process;
-pub use process::*;
-
-use tokio::sync::mpsc::error::{SendError, TryRecvError};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -17,9 +24,8 @@ pub enum Error {
     WaitTimeout,
     #[error(transparent)]
     ChannelTryRecv(#[from] TryRecvError),
-    #[error(transparent)]
-    ChannelSendError(#[from] SendError<CtrlMsg>),
-
+    // #[error(transparent)]
+    // ChannelSendError(#[from] SendError<CtrlMsg>),
     #[error(transparent)]
     IO(#[from] std::io::Error),
 
@@ -94,6 +100,91 @@ pub trait NamedMatcher {
     const NAME: &'static str;
 }
 
+pub type BoxStream<'a, T> = Pin<Box<dyn futures::Stream<Item = T> + Send + Sync + 'a>>;
+
+pub struct Request<T> {
+    msg: Arc<T>,
+}
+
+impl<T> Request<T> {
+    pub fn get_msg(&self) -> &T {
+        self.msg.as_ref()
+    }
+
+    pub fn from_msg(msg: T) -> Self {
+        Self { msg: Arc::new(msg) }
+    }
+}
+
+impl<T> Clone for Request<T> {
+    fn clone(&self) -> Self {
+        Self {
+            msg: self.msg.clone(),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Response<T> {
+    msg: T,
+}
+
+impl<T> Response<T> {
+    pub fn new(msg: T) -> Self {
+        Self { msg }
+    }
+    pub fn get_msg(&self) -> &T {
+        &self.msg
+    }
+
+    pub fn get_mut_msg(&mut self) -> &mut T {
+        &mut self.msg
+    }
+
+    pub fn into_msg(self) -> T {
+        self.msg
+    }
+}
+
+pin_project_lite::pin_project! {
+    pub struct RawMsg {
+        #[pin]
+        msg_stream: BoxStream<'static, Result<Vec<u8>, Error>>,
+        is_empty: bool
+    }
+}
+
+impl RawMsg {
+    pub fn new(msg_stream: BoxStream<'static, Result<Vec<u8>, Error>>) -> Self {
+        Self {
+            msg_stream,
+            is_empty: false,
+        }
+    }
+    pub fn new_empty() -> Self {
+        Self {
+            msg_stream: Box::pin(stream::empty()),
+            is_empty: true,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.is_empty
+    }
+}
+
+impl Stream for RawMsg {
+    type Item = Result<Vec<u8>, Error>;
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        Pin::new(&mut self.msg_stream).poll_next(cx)
+    }
+}
+
+pub enum Msg<T> {
+    Once(T),
+    Stream(BoxStream<'static, T>),
+}
+
 #[cfg(test)]
 mod test {
     use proto::etf::term::*;
@@ -115,4 +206,7 @@ mod test {
             .with(1, SmallAtomUtf8("b".to_string()).into());
         assert!(!tuple.pattern_match(&pattern));
     }
+
+    #[test]
+    fn test_matcher_trait() {}
 }

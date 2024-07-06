@@ -2,24 +2,26 @@ use std::{
     fmt::Debug,
     sync::atomic::{AtomicU32, AtomicU64, Ordering},
 };
+use std::marker::PhantomData;
+use std::sync::Arc;
 
 use dashmap::DashMap;
+use futures_util::StreamExt;
 use motore::{BoxCloneService, Service};
-use proto::{
-    term::{self},
-    CtrlMsg,
-};
-use tokio::sync::mpsc::UnboundedSender;
+
+use proto::{CtrlFromSlice, CtrlMsgInto, Encoder, Len, term, TermFromSlice};
+
+use crate::{BoxStream, Error, RawMsg, Request, Response};
 
 #[derive(Clone, Debug)]
 pub struct Process {
     pid: term::NewPid,
-    sender: UnboundedSender<CtrlMsg>,
+    // sender: UnboundedSender<CtrlMsg>,
 }
 
 impl Process {
-    pub fn new(pid: term::NewPid, sender: UnboundedSender<CtrlMsg>) -> Self {
-        Self { pid, sender }
+    pub fn new(pid: term::NewPid) -> Self {
+        Self { pid }
     }
 
     pub fn get_pid(&self) -> term::NewPid {
@@ -30,9 +32,9 @@ impl Process {
         &self.pid
     }
 
-    pub fn send(&self, msg: CtrlMsg) {
-        let _ = self.sender.send(msg);
-    }
+    // pub fn send(&self, msg: CtrlMsg) {
+    //    let _ = self.sender.send(msg);
+    // }
 }
 
 #[derive(Debug, Clone)]
@@ -41,57 +43,39 @@ static UNIQ_ID: AtomicU64 = AtomicU64::new(1);
 static PID_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone)]
-pub struct ProcessContext<P> {
+pub struct ProcessContext<C> {
     node_name: String,
     creation: u32,
-    sender: UnboundedSender<CtrlMsg>,
-    dispatcher: Dispatcher<P>,
     curr_match_id: MatchId,
-    box_cx: Option<P>,
+    dispatcher: Arc<Dispatcher<C, Vec<u8>>>,
+    box_cx: Option<C>,
 }
 
-impl<P> ProcessContext<P>
+impl<C> ProcessContext<C>
 where
-    P: Debug + Clone,
+    C: Debug + Clone + Send,
 {
-    pub fn with_dispatcher(
+    pub(crate) fn with_dispatcher(
         node_name: String,
         creation: u32,
-        dispatcher: Dispatcher<P>,
-        sender: UnboundedSender<CtrlMsg>,
+        dispatcher: Dispatcher<C, Vec<u8>>,
     ) -> Self {
         Self {
             node_name,
             creation,
             curr_match_id: MatchId(0),
-            dispatcher,
-            sender,
+            dispatcher: Arc::new(dispatcher),
             box_cx: None,
         }
     }
 
-    pub fn new(node_name: String, creation: u32, sender: UnboundedSender<CtrlMsg>) -> Self {
-        Self {
-            node_name,
-            creation,
-            curr_match_id: MatchId(0),
-            dispatcher: Dispatcher::new(),
-            sender,
-            box_cx: None,
-        }
-    }
-
-    pub fn send(&self, ctrl_msg: CtrlMsg) {
-        let _ = self.sender.send(ctrl_msg);
-    }
-
-    pub fn get_matcher(&self) -> Dispatcher<P> {
+    pub(crate) fn get_dispatcher(&self) -> Arc<Dispatcher<C>> {
         self.dispatcher.clone()
     }
 
     pub fn add_matcher<M>(&mut self, matcher: M) -> &mut Self
     where
-        M: Service<ProcessContext<P>, CtrlMsg, Response = bool, Error = crate::Error>
+        M: Service<ProcessContext<C>, Request<Vec<u8>>, Response = Response<RawMsg>, Error = Error>
             + Clone
             + Send
             + Sync
@@ -115,7 +99,7 @@ where
             creation: self.creation,
         };
 
-        Process::new(pid, self.sender.clone())
+        Process::new(pid)
     }
 
     /// create ref. refer to https://github.com/erlang/otp/blob/master/lib/erl_interface/src/connect/ei_connect.c#L745
@@ -133,37 +117,22 @@ where
         }
     }
 
-    pub fn set_box_cx(&mut self, cx: P) {
+    pub fn set_box_cx(&mut self, cx: C) {
         self.box_cx = Some(cx)
     }
 
-    pub fn get_box_cx(&self) -> Option<&P> {
+    pub fn get_box_cx(&self) -> Option<&C> {
         self.box_cx.as_ref()
     }
 
-    pub fn get_mut_box_cx(&mut self) -> Option<&mut P> {
+    pub fn get_mut_box_cx(&mut self) -> Option<&mut C> {
         self.box_cx.as_mut()
-    }
-}
-
-impl<P> Service<ProcessContext<P>, CtrlMsg> for ProcessContext<P>
-where
-    P: Debug + Clone + Send + Sync,
-{
-    type Response = bool;
-    type Error = crate::Error;
-    async fn call<'s, 'cx>(
-        &'s self,
-        cx: &'cx mut ProcessContext<P>,
-        req: CtrlMsg,
-    ) -> Result<Self::Response, Self::Error> {
-        self.dispatcher.call(cx, req).await
     }
 }
 
 static MATCH_ID: AtomicU32 = AtomicU32::new(0);
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct MatchId(u32);
+pub(crate) struct MatchId(u32);
 
 impl MatchId {
     pub fn next() -> Self {
@@ -173,26 +142,24 @@ impl MatchId {
 }
 
 #[derive(Debug, Clone)]
-pub struct Dispatcher<P> {
-    matchers: DashMap<MatchId, BoxCloneService<ProcessContext<P>, CtrlMsg, bool, crate::Error>>,
+pub(crate) struct Dispatcher<C, T = Vec<u8>> {
+    matchers:
+        DashMap<MatchId, BoxCloneService<ProcessContext<C>, Request<T>, Response<RawMsg>, Error>>,
 }
 
-impl<P> Default for Dispatcher<P> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl<P> Dispatcher<P> {
-    pub fn new() -> Self {
+impl<C, T> Dispatcher<C, T>
+where
+    T: 'static,
+{
+    pub(crate) fn new() -> Self {
         Self {
             matchers: DashMap::new(),
         }
     }
 
-    pub fn add_matcher<M>(&self, matcher_id: MatchId, matcher: M)
+    pub(crate) fn add_matcher<M>(&self, matcher_id: MatchId, matcher: M)
     where
-        M: Service<ProcessContext<P>, CtrlMsg, Response = bool, Error = crate::Error>
+        M: Service<ProcessContext<C>, Request<T>, Response = Response<RawMsg>, Error = Error>
             + Send
             + Sync
             + Clone
@@ -203,25 +170,136 @@ impl<P> Dispatcher<P> {
     }
 }
 
-impl<P> Service<ProcessContext<P>, CtrlMsg> for Dispatcher<P>
+impl<C, T> Service<ProcessContext<C>, Request<T>> for Dispatcher<C, T>
 where
-    P: Debug + Clone + Send,
+    C: Debug + Clone + Send + Sync,
+    T: Send + Sync + Clone,
 {
-    type Response = bool;
-    type Error = crate::Error;
+    type Response = Response<RawMsg>;
+    type Error = Error;
     async fn call<'s, 'cx>(
         &'s self,
-        cx: &'cx mut ProcessContext<P>,
-        req: CtrlMsg,
+        cx: &'cx mut ProcessContext<C>,
+        req: Request<T>,
     ) -> Result<Self::Response, Self::Error> {
         for matcher in self.matchers.iter() {
             let req = req.clone();
-            let is_match = matcher.call(cx, req).await?;
-            if is_match {
+            let resp = matcher.call(cx, req).await?;
+            if !resp.get_msg().is_empty() {
                 cx.set_match_id(*matcher.key());
-                return Ok(true);
+
+                return Ok(resp);
             }
         }
-        Ok(false)
+        Ok(Response::new(RawMsg::new_empty()))
+    }
+}
+
+pub struct DistCodec<S, T1, T2, U> {
+    inner: S,
+    _phat: PhantomData<(T1, T2, U)>,
+}
+
+impl<S, T1, T2, U> DistCodec<S, T1, T2, U> {
+    pub fn new(inner: S) -> Self {
+        Self {
+            inner,
+            _phat: PhantomData,
+        }
+    }
+}
+
+impl<S, T1, T2, U> Clone for DistCodec<S, T1, T2, U>
+where
+    S: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            _phat: PhantomData,
+        }
+    }
+}
+
+impl<S, C, T1, T2, U> Service<ProcessContext<C>, Request<Vec<u8>>> for DistCodec<S, T1, T2, U>
+where
+    S: Service<
+            ProcessContext<C>,
+            Request<CtrlMsgInto<T1, T2>>,
+            Response = Response<Option<BoxStream<'static, U>>>,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    S::Error: Into<crate::Error>,
+    T1: CtrlFromSlice<Error = anyhow::Error> + Len + Send + Sync + Clone + Debug + 'static,
+    T2: TermFromSlice<Error = anyhow::Error> + Len + Send + Sync + Clone + Debug + 'static,
+    U: Encoder<Error = anyhow::Error> + Len + Send + Sync + Debug + 'static,
+    C: Send + Sync,
+{
+    type Response = Response<RawMsg>;
+    type Error = Error;
+
+    async fn call<'s, 'cx>(
+        &'s self,
+        cx: &'cx mut ProcessContext<C>,
+        req: Request<Vec<u8>>,
+    ) -> Result<Self::Response, Self::Error> {
+        let msg = req.get_msg();
+        let ctrl_msg = CtrlMsgInto::<T1, T2>::try_from(msg.as_ref())
+            .map_err(Into::<Error>::into)
+            .ok();
+        if ctrl_msg.is_none() {
+            return Ok(Response::new(RawMsg::new_empty()));
+        }
+
+        let stream = self
+            .inner
+            .call(cx, Request::from_msg(ctrl_msg.unwrap()))
+            .await
+            .map_err(Into::into)?
+            .into_msg();
+
+        if let Some(stream) = stream {
+            let raw_msg = RawMsg::new(Box::pin(async_stream::stream! {
+               futures_util::pin_mut!(stream);
+                while let Some(msg) = stream.next().await {
+                    let mut buf = Vec::with_capacity(4 + msg.len());
+                    msg.encode(&mut buf)?;
+                    yield Ok(buf)
+                }
+            }));
+
+            return Ok(Response::new(raw_msg));
+        }
+
+        Ok(Response::new(RawMsg::new_empty()))
+    }
+}
+
+#[derive(Clone)]
+pub struct ServiceBuilder<S> {
+    service: S,
+}
+
+impl<S> ServiceBuilder<S> {
+    pub fn new(service: S) -> Self {
+        Self { service }
+    }
+}
+
+impl<S> ServiceBuilder<S> {
+    pub fn build<C, T1, T2, U>(self) -> DistCodec<S, T1, T2, U>
+    where
+        S: Service<
+            ProcessContext<C>,
+            Request<CtrlMsgInto<T1, T2>>,
+            Response = Response<Option<BoxStream<'static, U>>>,
+            Error = Error,
+        >,
+    {
+        let service = motore::builder::ServiceBuilder::new().service(self.service);
+
+        DistCodec::new(service)
     }
 }
