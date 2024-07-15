@@ -1,3 +1,9 @@
+pub use de::{Deserializer, from_term};
+pub use ser::{Serializer, to_term};
+
+mod de;
+mod error;
+mod ser;
 pub mod term;
 
 #[allow(dead_code)]
@@ -77,9 +83,3 @@ pub trait TermFromSlice: Sized {
     type Error;
     fn from_slice<T: AsRef<[u8]>>(slice: T) -> Result<Self, Self::Error>;
 }
-
-mod error;
-mod ser;
-pub use ser::{to_term, Serializer};
-mod de;
-pub use de::{from_term, Deserializer};

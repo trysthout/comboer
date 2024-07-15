@@ -1,7 +1,7 @@
 use num_bigint::BigInt;
 use serde::{ser, Serialize};
 
-use super::{error::Error, term::*, Sign};
+use super::{error::Error, Sign, term::*};
 
 pub struct Serializer;
 
@@ -108,16 +108,19 @@ impl<'a> ser::Serializer for &'a mut Serializer {
     }
 
     fn serialize_bytes(self, v: &[u8]) -> Result<Self::Ok, Self::Error> {
-        Ok(Term::from(Binary::from(v)))
+        Ok(Term::from(Binary {
+            length: v.len() as u32,
+            data: v.to_vec(),
+        }))
     }
 
     fn serialize_none(self) -> Result<Self::Ok, Self::Error> {
         Ok(Term::from(Nil))
     }
 
-    fn serialize_some<T: ?Sized>(self, value: &T) -> Result<Self::Ok, Self::Error>
+    fn serialize_some<T>(self, value: &T) -> Result<Self::Ok, Self::Error>
     where
-        T: Serialize,
+        T: Serialize + ?Sized,
     {
         value.serialize(self)
     }
@@ -139,18 +142,18 @@ impl<'a> ser::Serializer for &'a mut Serializer {
         self.serialize_str(variant)
     }
 
-    fn serialize_newtype_struct<T: ?Sized>(
+    fn serialize_newtype_struct<T>(
         self,
         _name: &'static str,
         value: &T,
     ) -> Result<Self::Ok, Self::Error>
     where
-        T: Serialize,
+        T: Serialize + ?Sized,
     {
         value.serialize(self)
     }
 
-    fn serialize_newtype_variant<T: ?Sized>(
+    fn serialize_newtype_variant<T>(
         self,
         _name: &'static str,
         _variant_index: u32,
@@ -158,7 +161,7 @@ impl<'a> ser::Serializer for &'a mut Serializer {
         value: &T,
     ) -> Result<Self::Ok, Self::Error>
     where
-        T: Serialize,
+        T: Serialize + ?Sized,
     {
         let value = value.serialize(self)?;
         Ok(Term::SmallTuple(SmallTuple {
@@ -458,8 +461,9 @@ impl<'a> ser::SerializeStructVariant for SerializeSeq<'a> {
 
 #[cfg(test)]
 mod test {
-    use super::*;
     use serde_derive::Serialize;
+
+    use super::*;
 
     #[test]
     fn ser_struct() {

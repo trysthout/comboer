@@ -114,6 +114,10 @@ impl<T> Request<T> {
     pub fn from_msg(msg: T) -> Self {
         Self { msg: Arc::new(msg) }
     }
+
+    pub fn into_msg(self) -> Arc<T> {
+        self.msg
+    }
 }
 
 impl<T> Clone for Request<T> {

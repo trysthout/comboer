@@ -2,10 +2,11 @@ use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::slice::{Chunks, Iter};
 
-use super::{error::Error, term::*};
 use num_traits::cast::*;
 use serde::de::{self, DeserializeSeed, EnumAccess, VariantAccess, Visitor};
 use serde::forward_to_deserialize_any;
+
+use super::{error::Error, term::*};
 
 pub struct Deserializer<'de> {
     input: &'de Term,
@@ -346,7 +347,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
             Term::SmallTuple(SmallTuple { arity: _, elems })
             | Term::LargeTuple(LargeTuple { arity: _, elems }) => match elems.as_slice() {
                 [variant, value] => {
-                    visitor.visit_enum(DeserializerEnum::new(self, (&variant, &value)))
+                    visitor.visit_enum(DeserializerEnum::new(self, (variant, value)))
                 }
                 _ => Err(Error::InvalidEnumTuple),
             },
@@ -622,7 +623,7 @@ impl<'de, 'a: 'de> de::Deserializer<'de> for DeserializerEnumVariant<'a> {
 mod test {
     use serde_derive::Deserialize;
 
-    use crate::etf::{de::from_term, term::*, Sign};
+    use crate::etf::{de::from_term, Sign, term::*};
 
     #[test]
     fn der_struct() {

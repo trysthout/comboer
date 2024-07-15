@@ -93,7 +93,7 @@ where
         let mut stream = TcpStream::connect(addr).await.unwrap();
         let _ = stream.set_nodelay(true);
         let handshake_codec = HandshakeCodec::new(self.node_name.clone(), self.cookie.clone());
-        let _ = self.client_handshake(handshake_codec, &mut stream).await?;
+        self.client_handshake(handshake_codec, &mut stream).await?;
         // let (internal_tx, internal_rx) = unbounded_channel::<CtrlMsg>();
         // self.internal_tx = Some(internal_tx.clone());
 

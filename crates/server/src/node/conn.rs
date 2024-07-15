@@ -96,7 +96,7 @@ where
         let length = BigEndian::read_u32(&self.buf[..4]) as usize;
         // Erlang Tick
         if length == 0 {
-            self.conn.as_mut().unwrap().write(&[0, 0, 0, 0]).await?;
+            self.conn.as_mut().unwrap().write_all(&[0, 0, 0, 0]).await?;
             return Ok(length);
         }
 

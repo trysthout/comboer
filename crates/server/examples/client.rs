@@ -3,8 +3,7 @@ use std::sync::Arc;
 use motore::Service;
 use tokio::sync::mpsc::UnboundedSender;
 
-use proto::{CtrlMsgInto, Encoder, etf::term, RegSend, SendSender};
-use proto::CtrlMsg;
+use proto::{CtrlMsg, Encoder, etf::term, RegSend, SendSender};
 use proto::term::{SmallAtomUtf8, SmallTuple};
 use server::{BoxStream, NodeAsClient, Process, ProcessContext, Request, Response, ServiceBuilder};
 
@@ -18,16 +17,16 @@ struct BoxCx {
     ctrl: RegSend,
 }
 
-impl Service<ProcessContext<BoxCx>, Request<CtrlMsgInto<SendSender, SmallAtomUtf8>>> for A {
+impl Service<ProcessContext<BoxCx>, Request<CtrlMsg<SendSender, SmallAtomUtf8>>> for A {
     type Response = Response<Option<BoxStream<'static, CtrlMsg<RegSend, term::Nil>>>>;
     type Error = server::Error;
     async fn call<'s, 'cx>(
         &'s self,
         cx: &'cx mut ProcessContext<BoxCx>,
-        req: Request<CtrlMsgInto<SendSender, SmallAtomUtf8>>,
+        req: Request<CtrlMsg<SendSender, SmallAtomUtf8>>,
     ) -> Result<Self::Response, Self::Error> {
         println!("req {:?}", req.get_msg());
-        if req.get_msg().msg == SmallAtomUtf8("hi".to_string()) {
+        if req.get_msg().msg == Some(SmallAtomUtf8("hi".to_string())) {
             let box_cx = cx.get_box_cx().unwrap();
             let ctrl = &box_cx.ctrl;
             let from = &box_cx.from;
@@ -70,14 +69,13 @@ async fn main() -> Result<(), server::Error> {
         to_name: SmallAtomUtf8("ss".to_string()),
     };
 
-    let msg: term::Term = SmallTuple {
+    let msg = SmallTuple {
         arity: 2,
         elems: vec![
             SmallAtomUtf8("call".to_string()).into(),
             from.clone().into(),
         ],
-    }
-    .into();
+    };
 
     let _ = conn.send_req_data(CtrlMsg::new(&ctrl, Some(msg))).await?;
     conn.get_cx().set_box_cx(BoxCx {
@@ -85,10 +83,6 @@ async fn main() -> Result<(), server::Error> {
         ctrl: ctrl.clone(),
     });
 
-    //let resp = conn.receive_resp_data::<SendSender, SmallTuple>().await?;
-    //println!("receive resp {:?}", resp);
-
-    // let _ = conn.send_req_data(CtrlMsg::new(ctrl, Some(msg))).await?;
     let _ = conn.serving().await?;
 
     Ok(())

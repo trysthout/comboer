@@ -9,7 +9,7 @@ use dashmap::DashMap;
 use futures_util::StreamExt;
 use motore::{BoxCloneService, Service};
 
-use proto::{CtrlFromSlice, CtrlMsgInto, Encoder, Len, term, TermFromSlice};
+use proto::{CtrlFromSlice, CtrlMsg, Encoder, Len, term, TermFromSlice};
 
 use crate::{BoxStream, Error, RawMsg, Request, Response};
 
@@ -141,10 +141,12 @@ impl MatchId {
     }
 }
 
+type Matchers<C, T> =
+    DashMap<MatchId, BoxCloneService<ProcessContext<C>, Request<T>, Response<RawMsg>, Error>>;
+
 #[derive(Debug, Clone)]
 pub(crate) struct Dispatcher<C, T = Vec<u8>> {
-    matchers:
-        DashMap<MatchId, BoxCloneService<ProcessContext<C>, Request<T>, Response<RawMsg>, Error>>,
+    matchers: Matchers<C, T>,
 }
 
 impl<C, T> Dispatcher<C, T>
@@ -225,7 +227,7 @@ impl<S, C, T1, T2, U> Service<ProcessContext<C>, Request<Vec<u8>>> for DistCodec
 where
     S: Service<
             ProcessContext<C>,
-            Request<CtrlMsgInto<T1, T2>>,
+            Request<CtrlMsg<T1, T2>>,
             Response = Response<Option<BoxStream<'static, U>>>,
         > + Clone
         + Send
@@ -246,7 +248,7 @@ where
         req: Request<Vec<u8>>,
     ) -> Result<Self::Response, Self::Error> {
         let msg = req.get_msg();
-        let ctrl_msg = CtrlMsgInto::<T1, T2>::try_from(msg.as_ref())
+        let ctrl_msg = CtrlMsg::<T1, T2>::try_from(msg.as_ref())
             .map_err(Into::<Error>::into)
             .ok();
         if ctrl_msg.is_none() {
@@ -293,7 +295,7 @@ impl<S> ServiceBuilder<S> {
     where
         S: Service<
             ProcessContext<C>,
-            Request<CtrlMsgInto<T1, T2>>,
+            Request<CtrlMsg<T1, T2>>,
             Response = Response<Option<BoxStream<'static, U>>>,
             Error = Error,
         >,

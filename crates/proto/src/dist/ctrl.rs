@@ -26,35 +26,30 @@ macro_rules! define_ctrl {
             const ARITY: u8 = $num;
         }
 
-        impl From<&[u8]> for $sn {
-            fn from(mut value: &[u8]) -> Self {
+        impl CtrlFromSlice for $sn {
+            type Error = anyhow::Error;
+            fn from_slice<T: AsRef<[u8]>>(value: T) -> Result<Self, Self::Error> {
+                let mut value = value.as_ref();
+                if value[3] != Self::CODE {
+                    return Err(anyhow::anyhow!("invalid tag, expected tag: {}, real tag: {}", Self::CODE, value[3]))
+                }
+
                 // SmallTuple 104
                 value.get_u8();
                 // SmallTuple arity
                 value.get_u8();
 
-                let code  = SmallInteger::from(value);
+                let code  = SmallInteger::from_slice(value)?;
                 value.advance(code.len());
 
                 $(
-                    let $f = <$ft>::from(value);
+                    let $f = <$ft>::from_slice(value)?;
                     value.advance($f.len());
                 )*
 
-                Self {
+                Ok(Self {
                     $( $f, )*
-                }
-            }
-        }
-
-        impl CtrlFromSlice for $sn {
-            type Error = anyhow::Error;
-            fn from_slice<T: AsRef<[u8]>>(value: T) -> Result<Self, Self::Error> {
-                let value = value.as_ref();
-                match value[3] {
-                    Self::CODE  => Ok(Self::from(value)),
-                    x => Err(anyhow::anyhow!("invalid tag, expected tag: {}, real tag: {}", Self::CODE, x))
-                }
+                })
             }
         }
 
@@ -544,13 +539,14 @@ impl Encoder for MFA {
     }
 }
 
-impl From<&[u8]> for MFA {
-    fn from(value: &[u8]) -> Self {
-        let tuple = SmallTuple::from(value);
+impl CtrlFromSlice for MFA {
+    type Error = anyhow::Error;
+    fn from_slice<T: AsRef<[u8]>>(value: T) -> Result<Self, Self::Error> {
+        let tuple = SmallTuple::from_slice(value)?;
         let module: SmallAtomUtf8 = tuple.elems[0].clone().try_into().unwrap();
         let fun: SmallAtomUtf8 = tuple.elems[1].clone().try_into().unwrap();
         let arity: SmallInteger = tuple.elems[2].clone().try_into().unwrap();
-        Self { module, fun, arity }
+        Ok(Self { module, fun, arity })
     }
 }
 
@@ -812,13 +808,14 @@ macro_rules! impl_ctrl {
            }
         }
 
-        impl TryFrom<&[u8]> for Ctrl {
+        impl CtrlFromSlice for Ctrl {
             type Error = anyhow::Error;
-            fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+            fn from_slice<T: AsRef<[u8]>>(value: T) -> Result<Self, Self::Error> {
+               let value = value.as_ref();
                 match value[3] {
-                    $($t::CODE => Ok(Self::$t($t::from(value))),)+
+                    $($t::CODE => Ok(Self::$t($t::from_slice(value)?)),)+
                     _ => Err(anyhow::anyhow!("cannot convert value type to CtrlMsg"))
-                }
+               }
             }
         }
 
@@ -971,22 +968,6 @@ where
     }
 }
 
-impl<T, U> Encoder for Option<CtrlMsg<T, U>>
-where
-    T: Encoder<Error = anyhow::Error> + Len + Send + Sync,
-    U: Encoder<Error = anyhow::Error> + Len + Send + Sync,
-{
-    type Error = anyhow::Error;
-    fn encode<W: Write>(&self, w: &mut W) -> Result<(), Self::Error> {
-        if self.is_none() {
-            return Ok(());
-        }
-
-        self.as_ref().unwrap().encode(w)?;
-        Ok(())
-    }
-}
-
 impl<T, U> TryFrom<&[u8]> for CtrlMsg<T, U>
 where
     T: CtrlFromSlice<Error = anyhow::Error> + Len,
@@ -1002,7 +983,7 @@ where
         value.advance(ctrl.len());
 
         let msg = match value.is_empty() {
-            true => U::from_slice(&[term::Nil::TAG])?,
+            true => U::from_slice([term::Nil::TAG])?,
             false => {
                 // 131
                 value.get_u8();
@@ -1030,57 +1011,6 @@ where
     }
 }
 
-impl<T, U> Len for Option<CtrlMsg<T, U>>
-where
-    T: Len,
-    U: Len,
-{
-    fn len(&self) -> usize {
-        match self {
-            None => 0,
-            Some(c) => c.len(),
-        }
-    }
-}
-
-//pub struct CtrlMsgInto<C, T> {
-//    pub ctrl: C,
-//    pub msg: T
-//}
-#[derive(Debug, Clone)]
-pub struct CtrlMsgInto<C, T> {
-    pub ctrl: C,
-    pub msg: T,
-}
-
-impl<C, T> TryFrom<&[u8]> for CtrlMsgInto<C, T>
-where
-    C: CtrlFromSlice<Error = anyhow::Error> + Len,
-    T: TermFromSlice<Error = anyhow::Error> + Len,
-{
-    type Error = anyhow::Error;
-    fn try_from(mut value: &[u8]) -> Result<Self, Self::Error> {
-        // 112
-        value.get_u8();
-        // 131
-        value.get_u8();
-        let ctrl = C::from_slice(value)?;
-        value.advance(ctrl.len());
-        let msg = match value.is_empty() {
-            true => T::from_slice(&[term::Nil::TAG])?,
-            false => {
-                // 131
-                value.get_u8();
-                let term = T::from_slice(value)?;
-                value.advance(term.len());
-                term
-            }
-        };
-
-        Ok(Self { ctrl, msg })
-    }
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
@@ -1091,7 +1021,8 @@ mod test {
             104, 3, 97, 2, 119, 0, 88, 119, 8, 97, 64, 102, 101, 100, 111, 114, 97, 0, 0, 0, 116,
             0, 0, 0, 0, 101, 136, 14, 0,
         ];
-        let s = SendCtrl::from(&buf[..]);
+        let s = SendCtrl::from_slice(&buf).unwrap();
+        println!("{:?}", s);
         assert_eq!(s.unused.0, "");
         assert_eq!(s.to.id, 116);
         assert_eq!(s.len(), 29);
@@ -1123,9 +1054,10 @@ mod test {
             11, 114, 117, 115, 116, 64, 102, 101, 100, 111, 114, 97, 0, 0, 0, 2, 0, 0, 0, 0, 101,
             183, 41, 140,
         ];
-        println!("buf {:?}", buf);
-        let dist = CtrlMsg::try_from(&buf[..]).unwrap();
-        println!("dist {:?}", dist.len());
+        let dist = CtrlMsg::<Ctrl, Term>::try_from(&buf[..]).unwrap();
+        println!("dist {:?}", dist);
+        assert!(matches!(dist.ctrl, Ctrl::SpawnReply(_)));
+        assert!(matches!(dist.msg, Some(Term::Nil(_))));
     }
 
     #[test]
@@ -1152,23 +1084,10 @@ mod test {
             }),
         };
 
-        let ctrl_msg = CtrlMsg::new(reply.into(), None);
+        let ctrl_msg = CtrlMsg::<SpawnReply, Nil>::new(reply, None);
         let mut buf = vec![];
         let _ = ctrl_msg.encode(&mut buf);
         assert_eq!(ctrl_msg.len() + 4, buf.len());
         println!("ctrl_msg {:?}", ctrl_msg);
     }
-
-    //#[test]
-    //fn send() {
-    //    let buf = vec![
-    //        0x61, 0x06, 0x58, 0x77, 0x08, 0x62, 0x40, 0x66, 0x65, 0x64, 0x6f, 0x72, 0x61, 0x00,
-    //        0x00, 0x00, 0x39, 0x00, 0x00, 0x00, 0x00, 0x65, 0x88, 0x36, 0x16, 0x83, 0x68, 0x02,
-    //        0x58, 0x77, 0x08, 0x62, 0x40, 0x66, 0x65, 0x64, 0x6f, 0x72, 0x61, 0x00, 0x00, 0x00,
-    //        0x39, 0x00, 0x00, 0x00, 0x00, 0x65, 0x88, 0x36, 0x16, 0x77, 0x10, 0x66, 0x65, 0x61,
-    //        0x74, 0x75, 0x72, 0x65, 0x73, 0x5f, 0x72, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74,
-    //    ];
-    //    let s = SendCtrl::from(&buf[..]);
-    //    println!("{:?}", s);
-    //}
 }

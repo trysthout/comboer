@@ -1,6 +1,7 @@
-use crate::{Encoder, Len};
 use bytes::Buf;
 use num_bigint::BigInt;
+
+use crate::{CtrlFromSlice, Encoder, Len};
 
 use super::*;
 
@@ -83,13 +84,25 @@ impl Encoder for AtomUtf8 {
     }
 }
 
-impl<'a> From<&'a [u8]> for AtomUtf8 {
-    fn from(mut value: &'a [u8]) -> Self {
+// impl<'a> From<&'a [u8]> for AtomUtf8 {
+//     fn from(mut value: &'a [u8]) -> Self {
+//         value.get_u8();
+//         let n = value.get_u16() as usize;
+//         let (node_bytes, _) = value.split_at(n);
+//         let s = String::from_utf8_lossy(node_bytes).to_string();
+//         AtomUtf8(s)
+//     }
+// }
+
+impl TermFromSlice for AtomUtf8 {
+    type Error = anyhow::Error;
+    fn from_slice<T: AsRef<[u8]>>(value: T) -> Result<Self, Self::Error> {
+        let mut value = value.as_ref();
         value.get_u8();
         let n = value.get_u16() as usize;
         let (node_bytes, _) = value.split_at(n);
-        let s = String::from_utf8_lossy(node_bytes).to_string();
-        AtomUtf8(s)
+        let s = String::from_utf8(node_bytes.to_vec()).map_err(anyhow::Error::new)?;
+        Ok(AtomUtf8(s))
     }
 }
 
@@ -120,14 +133,16 @@ impl Encoder for SmallAtomUtf8 {
     }
 }
 
-impl<'a> From<&'a [u8]> for SmallAtomUtf8 {
-    fn from(mut value: &'a [u8]) -> Self {
+impl TermFromSlice for SmallAtomUtf8 {
+    type Error = anyhow::Error;
+    fn from_slice<T: AsRef<[u8]>>(value: T) -> Result<Self, Self::Error> {
+        let mut value = value.as_ref();
         value.get_u8();
         let n = value.get_u8() as usize;
         let (node_bytes, _) = value.split_at(n);
-        let s = String::from_utf8_lossy(node_bytes).to_string();
+        let s = String::from_utf8(node_bytes.to_vec()).map_err(anyhow::Error::new)?;
         value.advance(n);
-        SmallAtomUtf8(s)
+        Ok(SmallAtomUtf8(s))
     }
 }
 
@@ -144,9 +159,9 @@ impl From<&str> for SmallAtomUtf8 {
 }
 
 impl From<String> for SmallAtomUtf8 {
-   fn from(value: String) -> Self {
-      Self(value) 
-   } 
+    fn from(value: String) -> Self {
+        Self(value)
+    }
 }
 
 ///
@@ -176,21 +191,22 @@ impl Encoder for Pid {
         Ok(())
     }
 }
-
-impl<'a> From<&'a [u8]> for Pid {
-    fn from(mut value: &'a [u8]) -> Self {
+impl TermFromSlice for Pid {
+    type Error = anyhow::Error;
+    fn from_slice<T: AsRef<[u8]>>(value: T) -> Result<Self, Self::Error> {
+        let mut value = value.as_ref();
         value.get_u8();
-        let atom = SmallAtomUtf8::from(value);
+        let atom = SmallAtomUtf8::from_slice(value)?;
         value.advance(atom.len());
         let id = value.get_u32();
         let serial = value.get_u32();
         let creation = value.get_u8();
-        Pid {
+        Ok(Pid {
             node: atom,
             id,
             serial,
             creation,
-        }
+        })
     }
 }
 
@@ -230,20 +246,22 @@ impl Encoder for NewPid {
     }
 }
 
-impl<'a> From<&'a [u8]> for NewPid {
-    fn from(mut value: &'a [u8]) -> Self {
+impl TermFromSlice for NewPid {
+    type Error = anyhow::Error;
+    fn from_slice<T: AsRef<[u8]>>(value: T) -> Result<Self, Self::Error> {
+        let mut value = value.as_ref();
         value.get_u8();
-        let atom = SmallAtomUtf8::from(value);
+        let atom = SmallAtomUtf8::from_slice(value)?;
         value.advance(atom.len());
         let id = value.get_u32();
         let serial = value.get_u32();
         let creation = value.get_u32();
-        NewPid {
+        Ok(NewPid {
             node: atom,
             id,
             serial,
             creation,
-        }
+        })
     }
 }
 
@@ -274,12 +292,13 @@ impl Encoder for SmallInteger {
         Ok(())
     }
 }
-
-impl From<&[u8]> for SmallInteger {
-    fn from(mut value: &[u8]) -> Self {
+impl TermFromSlice for SmallInteger {
+    type Error = anyhow::Error;
+    fn from_slice<T: AsRef<[u8]>>(value: T) -> Result<Self, Self::Error> {
+        let mut value = value.as_ref();
         value.get_u8();
         let inner = value.get_u8();
-        SmallInteger(inner)
+        Ok(SmallInteger(inner))
     }
 }
 
@@ -309,12 +328,13 @@ impl Encoder for Integer {
         Ok(())
     }
 }
-
-impl<'a> From<&'a [u8]> for Integer {
-    fn from(mut value: &'a [u8]) -> Self {
+impl TermFromSlice for Integer {
+    type Error = anyhow::Error;
+    fn from_slice<T: AsRef<[u8]>>(value: T) -> Result<Self, Self::Error> {
+        let mut value = value.as_ref();
         value.get_u8();
         let inner = value.get_i32();
-        Integer(inner)
+        Ok(Integer(inner))
     }
 }
 
@@ -339,12 +359,13 @@ impl Encoder for FixedInteger {
         }
     }
 }
-
-impl<'a> From<&'a [u8]> for FixedInteger {
-    fn from(value: &'a [u8]) -> Self {
+impl TermFromSlice for FixedInteger {
+    type Error = anyhow::Error;
+    fn from_slice<T: AsRef<[u8]>>(value: T) -> Result<Self, Self::Error> {
+        let value = value.as_ref();
         match value[0] {
-            SMALL_INTEGER_EXT => FixedInteger::SmallInteger(SmallInteger::from(value)),
-            INTEGER_EXT => FixedInteger::Integer(Integer::from(value)),
+            SMALL_INTEGER_EXT => Ok(FixedInteger::SmallInteger(SmallInteger::from_slice(value)?)),
+            INTEGER_EXT => Ok(FixedInteger::Integer(Integer::from_slice(value)?)),
             _ => unreachable!(),
         }
     }
@@ -380,12 +401,17 @@ impl Encoder for Float {
     }
 }
 
-impl<'a> From<&'a [u8]> for Float {
-    fn from(mut value: &'a [u8]) -> Self {
+impl TermFromSlice for Float {
+    type Error = anyhow::Error;
+    fn from_slice<T: AsRef<[u8]>>(value: T) -> Result<Self, Self::Error> {
+        let mut value = value.as_ref();
         value.get_u8();
         let (inner, _) = value.split_at(31);
-        let inner = format!("{:0<31}", String::from_utf8_lossy(inner));
-        Float(inner)
+        let inner = format!(
+            "{:0<31}",
+            std::str::from_utf8(inner).map_err(anyhow::Error::new)?
+        );
+        Ok(Float(inner))
     }
 }
 
@@ -416,11 +442,12 @@ impl Encoder for NewFloat {
         Ok(())
     }
 }
-
-impl<'a> From<&'a [u8]> for NewFloat {
-    fn from(mut value: &'a [u8]) -> Self {
+impl TermFromSlice for NewFloat {
+    type Error = anyhow::Error;
+    fn from_slice<T: AsRef<[u8]>>(value: T) -> Result<Self, Self::Error> {
+        let mut value = value.as_ref();
         value.get_u8();
-        NewFloat(value.get_f64())
+        Ok(NewFloat(value.get_f64()))
     }
 }
 
@@ -456,19 +483,20 @@ impl Encoder for Port {
         Ok(())
     }
 }
-
-impl<'a> From<&'a [u8]> for Port {
-    fn from(mut value: &'a [u8]) -> Self {
+impl TermFromSlice for Port {
+    type Error = anyhow::Error;
+    fn from_slice<T: AsRef<[u8]>>(value: T) -> Result<Self, Self::Error> {
+        let mut value = value.as_ref();
         value.get_u8();
-        let atom = SmallAtomUtf8::from(value);
+        let atom = SmallAtomUtf8::from_slice(value)?;
         value.advance(atom.len());
         let id = value.get_u32();
         let creation = value.get_u8();
-        Port {
+        Ok(Port {
             node: atom,
             id,
             creation,
-        }
+        })
     }
 }
 
@@ -505,18 +533,20 @@ impl Encoder for NewPort {
     }
 }
 
-impl<'a> From<&'a [u8]> for NewPort {
-    fn from(mut value: &'a [u8]) -> Self {
+impl TermFromSlice for NewPort {
+    type Error = anyhow::Error;
+    fn from_slice<T: AsRef<[u8]>>(value: T) -> Result<Self, Self::Error> {
+        let mut value = value.as_ref();
         value.get_u8();
-        let atom = SmallAtomUtf8::from(value);
+        let atom = SmallAtomUtf8::from_slice(value)?;
         value.advance(atom.len());
         let id = value.get_u32();
         let creation = value.get_u32();
-        NewPort {
+        Ok(NewPort {
             node: atom,
             id,
             creation,
-        }
+        })
     }
 }
 
@@ -552,18 +582,20 @@ impl Encoder for V4Port {
     }
 }
 
-impl<'a> From<&'a [u8]> for V4Port {
-    fn from(mut value: &'a [u8]) -> Self {
+impl TermFromSlice for V4Port {
+    type Error = anyhow::Error;
+    fn from_slice<T: AsRef<[u8]>>(value: T) -> Result<Self, Self::Error> {
+        let mut value = value.as_ref();
         value.get_u8();
-        let atom = SmallAtomUtf8::from(value);
+        let atom = SmallAtomUtf8::from_slice(value)?;
         value.advance(atom.len());
         let id = value.get_u64();
         let creation = value.get_u32();
-        V4Port {
+        Ok(V4Port {
             node: atom,
             id,
             creation,
-        }
+        })
     }
 }
 
@@ -600,18 +632,22 @@ impl Encoder for SmallTuple {
     }
 }
 
-impl<'a> From<&'a [u8]> for SmallTuple {
-    fn from(mut value: &'a [u8]) -> Self {
+impl TermFromSlice for SmallTuple {
+    type Error = anyhow::Error;
+    fn from_slice<T: AsRef<[u8]>>(value: T) -> Result<Self, Self::Error> {
+        let mut value = value.as_ref();
         value.get_u8();
         let arity = value.get_u8();
-        let mut elems = Vec::with_capacity(arity as usize);
-        (0..arity).for_each(|_| {
-            let term = Term::from(value);
-            value.advance(term.len());
-            elems.push(term);
-        });
+        // let mut elems = Vec::with_capacity(arity as usize);
+        let elems = (0..arity)
+            .map(|_| {
+                let term = Term::from_slice(value)?;
+                value.advance(term.len());
+                Ok(term)
+            })
+            .collect::<Result<Vec<_>, anyhow::Error>>()?;
 
-        SmallTuple { arity, elems }
+        Ok(SmallTuple { arity, elems })
     }
 }
 
@@ -657,18 +693,37 @@ impl Encoder for LargeTuple {
     }
 }
 
-impl<'a> From<&'a [u8]> for LargeTuple {
-    fn from(mut value: &'a [u8]) -> Self {
+// impl<'a> From<&'a [u8]> for LargeTuple {
+//     fn from(mut value: &'a [u8]) -> Self {
+//         value.get_u8();
+//         let arity = value.get_u32();
+//         let mut elems = Vec::with_capacity(10);
+//         (0..arity).for_each(|_| {
+//             let term = Term::from(value);
+//             value.advance(term.len());
+//             elems.push(term);
+//         });
+//
+//         LargeTuple { arity, elems }
+//     }
+// }
+
+impl TermFromSlice for LargeTuple {
+    type Error = anyhow::Error;
+    fn from_slice<T: AsRef<[u8]>>(value: T) -> Result<Self, Self::Error> {
+        let mut value = value.as_ref();
         value.get_u8();
         let arity = value.get_u32();
-        let mut elems = Vec::with_capacity(10);
-        (0..arity).for_each(|_| {
-            let term = Term::from(value);
-            value.advance(term.len());
-            elems.push(term);
-        });
+        // let mut elems = Vec::with_capacity(10);
+        let elems = (0..arity)
+            .map(|_| {
+                let term = Term::from_slice(value)?;
+                value.advance(term.len());
+                Ok(term)
+            })
+            .collect::<Result<Vec<_>, anyhow::Error>>()?;
 
-        LargeTuple { arity, elems }
+        Ok(LargeTuple { arity, elems })
     }
 }
 
@@ -705,18 +760,22 @@ impl Encoder for Map {
     }
 }
 
-impl<'a> From<&'a [u8]> for Map {
-    fn from(mut value: &'a [u8]) -> Self {
+impl TermFromSlice for Map {
+    type Error = anyhow::Error;
+    fn from_slice<T: AsRef<[u8]>>(value: T) -> Result<Self, Self::Error> {
+        let mut value = value.as_ref();
         value.get_u8();
         let arity = value.get_u32();
-        let mut pairs = Vec::with_capacity(10);
-        (0..arity * 2).for_each(|_| {
-            let term = Term::from(value);
-            value.advance(term.len());
-            pairs.push(term);
-        });
+        // let mut pairs = Vec::with_capacity(10);
+        let pairs = (0..arity * 2)
+            .map(|_| {
+                let term = Term::from_slice(value)?;
+                value.advance(term.len());
+                Ok(term)
+            })
+            .collect::<Result<Vec<_>, anyhow::Error>>()?;
 
-        Map { arity, pairs }
+        Ok(Map { arity, pairs })
     }
 }
 
@@ -746,10 +805,12 @@ impl Encoder for Nil {
     }
 }
 
-impl<'a> From<&'a [u8]> for Nil {
-    fn from(mut value: &'a [u8]) -> Self {
+impl TermFromSlice for Nil {
+    type Error = anyhow::Error;
+    fn from_slice<T: AsRef<[u8]>>(value: T) -> Result<Self, Self::Error> {
+        let mut value = value.as_ref();
         value.get_u8();
-        Nil
+        Ok(Self)
     }
 }
 
@@ -783,17 +844,18 @@ impl Encoder for StringExt {
         Ok(())
     }
 }
-
-impl<'a> From<&'a [u8]> for StringExt {
-    fn from(mut value: &'a [u8]) -> Self {
+impl TermFromSlice for StringExt {
+    type Error = anyhow::Error;
+    fn from_slice<T: AsRef<[u8]>>(value: T) -> Result<Self, Self::Error> {
+        let mut value = value.as_ref();
         value.get_u8();
         let length = value.get_u16();
         let (chars, _) = value.split_at(length as usize);
         value.advance(length as usize);
-        StringExt {
+        Ok(StringExt {
             length,
             chars: chars.to_vec(),
-        }
+        })
     }
 }
 
@@ -832,37 +894,39 @@ impl Encoder for List {
     }
 }
 
-impl<'a> From<&'a [u8]> for List {
-    fn from(mut value: &'a [u8]) -> Self {
-        println!("value {:?}", value);
+impl TermFromSlice for List {
+    type Error = anyhow::Error;
+    fn from_slice<T: AsRef<[u8]>>(value: T) -> Result<Self, Self::Error> {
+        let mut value = value.as_ref();
         value.get_u8();
         let length = value.get_u32();
-        let mut elems = Vec::with_capacity(length as usize);
-        (0..length).for_each(|_| {
-            let term = Term::from(value);
-            println!("value1 term {:?} {:?}", term, value);
-            value.advance(term.len());
-            elems.push(term);
-        });
+        // let mut elems = Vec::with_capacity(length as usize);
+        let elems = (0..length as usize)
+            .map(|_| {
+                let term = Term::from_slice(value)?;
+                value.advance(term.len());
+                Ok(term)
+            })
+            .collect::<Result<Vec<_>, anyhow::Error>>()?;
 
         if !value.is_empty() && value[0] == NIL_EXT {
-            let tail = Term::from(value);
+            let tail = Term::from_slice(value)?;
             value.advance(tail.len());
-            return List {
+            return Ok(List {
                 length,
                 elems,
                 tail: Box::new(tail),
-            };
+            });
         }
 
-        let tail = Term::from(value);
+        let tail = Term::from_slice(value)?;
         value.advance(tail.len());
 
-        List {
+        Ok(List {
             length,
             elems,
             tail: Box::new(tail),
-        }
+        })
     }
 }
 
@@ -896,17 +960,18 @@ impl Encoder for Binary {
         Ok(())
     }
 }
-
-impl From<&[u8]> for Binary {
-    fn from(mut value: &[u8]) -> Self {
+impl TermFromSlice for Binary {
+    type Error = anyhow::Error;
+    fn from_slice<T: AsRef<[u8]>>(value: T) -> Result<Self, Self::Error> {
+        let mut value = value.as_ref();
         value.get_u8();
         let length = value.get_u32();
         let (data, _) = value.split_at(length as usize);
         value.advance(length as usize);
-        Binary {
+        Ok(Binary {
             length,
             data: data.to_vec(),
-        }
+        })
     }
 }
 
@@ -943,16 +1008,17 @@ impl Encoder for SmallBig {
         Ok(())
     }
 }
-
-impl<'a> From<&'a [u8]> for SmallBig {
-    fn from(mut value: &'a [u8]) -> Self {
+impl TermFromSlice for SmallBig {
+    type Error = anyhow::Error;
+    fn from_slice<T: AsRef<[u8]>>(value: T) -> Result<Self, Self::Error> {
+        let mut value = value.as_ref();
         value.get_u8();
         let length = value.get_u8();
         let sign: Sign = value.get_u8().into();
         let (data, _) = value.split_at(length as usize);
         value.advance(length as usize);
         let n = BigInt::from_bytes_le((&sign).into(), data);
-        SmallBig { length, sign, n }
+        Ok(SmallBig { length, sign, n })
     }
 }
 
@@ -990,15 +1056,17 @@ impl Encoder for LargeBig {
     }
 }
 
-impl<'a> From<&'a [u8]> for LargeBig {
-    fn from(mut value: &'a [u8]) -> Self {
+impl TermFromSlice for LargeBig {
+    type Error = anyhow::Error;
+    fn from_slice<T: AsRef<[u8]>>(value: T) -> Result<Self, Self::Error> {
+        let mut value = value.as_ref();
         value.get_u8();
         let length = value.get_u32();
         let sign: Sign = value.get_u8().into();
         let (data, _) = value.split_at(length as usize);
         value.advance(length as usize);
         let n = BigInt::from_bytes_le((&sign).into(), data);
-        LargeBig { length, sign, n }
+        Ok(LargeBig { length, sign, n })
     }
 }
 
@@ -1034,23 +1102,23 @@ impl Encoder for NewerReference {
     }
 }
 
-impl<'a> From<&'a [u8]> for NewerReference {
-    fn from(mut value: &'a [u8]) -> Self {
+impl TermFromSlice for NewerReference {
+    type Error = anyhow::Error;
+    fn from_slice<T: AsRef<[u8]>>(value: T) -> Result<Self, Self::Error> {
+        let mut value = value.as_ref();
         value.get_u8();
         let length = value.get_u16();
-        let node = SmallAtomUtf8::from(value);
+        let node = SmallAtomUtf8::from_slice(value)?;
         value.advance(node.len());
         let creation = value.get_u32();
-        let mut id = Vec::with_capacity(length as usize);
-        (0..length).for_each(|_| {
-            id.push(value.get_u32());
-        });
-        NewerReference {
+        // let mut id = Vec::with_capacity(length as usize);
+        let id = (0..length).map(|_| value.get_u32()).collect();
+        Ok(NewerReference {
             length,
             node,
             creation,
             id,
-        }
+        })
     }
 }
 
@@ -1090,8 +1158,10 @@ impl Encoder for BitBinary {
     }
 }
 
-impl<'a> From<&'a [u8]> for BitBinary {
-    fn from(mut value: &'a [u8]) -> Self {
+impl TermFromSlice for BitBinary {
+    type Error = anyhow::Error;
+    fn from_slice<T: AsRef<[u8]>>(value: T) -> Result<Self, Self::Error> {
+        let mut value = value.as_ref();
         value.get_u8();
         let length = value.get_u32();
         let bits = value.get_u8();
@@ -1101,7 +1171,7 @@ impl<'a> From<&'a [u8]> for BitBinary {
             data[length as usize - 1] = last;
         }
 
-        BitBinary { length, bits, data }
+        Ok(BitBinary { length, bits, data })
     }
 }
 
@@ -1139,21 +1209,23 @@ impl Encoder for Export {
     }
 }
 
-impl<'a> From<&'a [u8]> for Export {
-    fn from(mut value: &'a [u8]) -> Self {
+impl TermFromSlice for Export {
+    type Error = anyhow::Error;
+    fn from_slice<T: AsRef<[u8]>>(value: T) -> Result<Self, Self::Error> {
+        let mut value = value.as_ref();
         value.get_u8();
-        let module = SmallAtomUtf8::from(value);
+        let module = SmallAtomUtf8::from_slice(value)?;
         value.advance(module.len());
-        let fun = Term::from(value);
+        let fun = Term::from_slice(value)?;
         value.advance(fun.len());
-        let arity = SmallInteger::from(value);
+        let arity = SmallInteger::from_slice(value)?;
         value.advance(arity.len());
 
-        Export {
+        Ok(Export {
             module,
             fun: Box::new(fun),
             arity,
-        }
+        })
     }
 }
 
@@ -1206,31 +1278,35 @@ impl Encoder for NewFun {
     }
 }
 
-impl<'a> From<&'a [u8]> for NewFun {
-    fn from(mut value: &'a [u8]) -> Self {
+impl CtrlFromSlice for NewFun {
+    type Error = anyhow::Error;
+    fn from_slice<T: AsRef<[u8]>>(value: T) -> Result<Self, Self::Error> {
+        let mut value = value.as_ref();
         value.get_u8();
         let size = value.get_u32();
         let arity = value.get_u8();
         let (uniq, mut value) = value.split_at(16);
         let index = value.get_u32();
         let num_free = value.get_u32();
-        let module = SmallAtomUtf8::from(value);
+        let module = SmallAtomUtf8::from_slice(value)?;
         value.advance(module.len());
-        let old_index = FixedInteger::from(value);
+        let old_index = FixedInteger::from_slice(value)?;
         value.advance(old_index.len());
-        let old_uniq = FixedInteger::from(value);
+        let old_uniq = FixedInteger::from_slice(value)?;
         value.advance(old_uniq.len());
-        let pid = NewPid::from(value);
+        let pid = NewPid::from_slice(value)?;
         value.advance(pid.len());
 
-        let mut free_vars = Vec::with_capacity(num_free as usize);
-        (0..num_free).for_each(|_| {
-            let term = Term::from(value);
-            value.advance(term.len());
-            free_vars.push(term);
-        });
+        // let mut free_vars = Vec::with_capacity(num_free as usize);
+        let free_vars = (0..num_free)
+            .map(|_| {
+                let term = Term::from_slice(value)?;
+                value.advance(term.len());
+                Ok(term)
+            })
+            .collect::<Result<Vec<_>, anyhow::Error>>()?;
 
-        NewFun {
+        Ok(NewFun {
             size,
             arity,
             uniq: uniq.try_into().unwrap(),
@@ -1241,7 +1317,7 @@ impl<'a> From<&'a [u8]> for NewFun {
             old_uniq,
             pid,
             free_vars,
-        }
+        })
     }
 }
 
@@ -1284,6 +1360,16 @@ impl<'a> From<&'a [u8]> for Local {
     }
 }
 
+impl TermFromSlice for Local {
+    type Error = anyhow::Error;
+    fn from_slice<T: AsRef<[u8]>>(value: T) -> Result<Self, Self::Error> {
+        let mut value = value.as_ref();
+        value.get_u8();
+        let data = value.chunk();
+        Ok(Local(data.to_vec()))
+    }
+}
+
 impl Len for Local {
     fn len(&self) -> usize {
         1 + self.0.len()
@@ -1306,11 +1392,13 @@ impl Encoder for PidOrAtom {
     }
 }
 
-impl From<&[u8]> for PidOrAtom {
-    fn from(value: &[u8]) -> Self {
+impl TermFromSlice for PidOrAtom {
+    type Error = anyhow::Error;
+    fn from_slice<T: AsRef<[u8]>>(value: T) -> Result<Self, Self::Error> {
+        let value = value.as_ref();
         match value[0] {
-            NEW_PID_EXT => Self::Pid(NewPid::from(value)),
-            SMALL_ATOM_UTF8_EXT => Self::Atom(SmallAtomUtf8::from(value)),
+            NEW_PID_EXT => Ok(Self::Pid(NewPid::from_slice(value)?)),
+            SMALL_ATOM_UTF8_EXT => Ok(Self::Atom(SmallAtomUtf8::from_slice(value)?)),
             _ => unreachable!(),
         }
     }
@@ -1345,21 +1433,6 @@ impl From<&PidOrAtom> for PidOrAtom {
 
 macro_rules! impl_from_into {
     ($($t:ident),+) => {
-        $(
-            impl TermFromSlice for $t {
-                type Error = anyhow::Error;
-                fn from_slice<T: AsRef<[u8]>>(value: T) -> Result<Self, Self::Error> {
-                    let value = value.as_ref();
-                    let tag = value[0];
-                    if tag != Self::TAG {
-                        return Err(anyhow::anyhow!("Invalid term tag, expected: {:?}, real: {:?}", Self::TAG, tag));
-                    }
-
-                    Ok(Self::from(value))
-                }
-            }
-        )+
-
         #[derive(Debug, Clone, PartialEq)]
         pub enum Term {
             $($t($t),)+
@@ -1374,14 +1447,17 @@ macro_rules! impl_from_into {
             }
         }
 
-        impl From<&[u8]> for Term {
-            fn from(value: &[u8]) -> Self {
-                match value[0] {
-                    $($t::TAG => Self::$t($t::from(value)),)+
-                    _ => unreachable!()
-                }
-            }
+        impl TermFromSlice for Term {
+           type Error = anyhow::Error;
+           fn from_slice<T: AsRef<[u8]>>(value: T) -> Result<Self, Self::Error> {
+               let value = value.as_ref();
+               match value[0] {
+                    $($t::TAG => Ok(Self::$t($t::from_slice(value)?)),)+
+                    _ => Err(anyhow::anyhow!("Invalid term tag: {:?}", value[0]))
+               }
+           }
         }
+
 
         impl Len for Term {
             fn len(&self) -> usize {
@@ -1476,7 +1552,7 @@ mod test {
         pid.encode(&mut enc).unwrap();
         let enc = enc.into_inner();
         println!("{:?}", &enc[..]);
-        let pid = Term::from(&enc[..]);
+        let pid = Term::from_slice(enc).unwrap();
         println!("{:?} {:?}", pid, pid.len());
     }
 
@@ -1507,7 +1583,7 @@ mod test {
             116, 0, 0, 0, 2, 97, 1, 88, 119, 8, 97, 64, 102, 101, 100, 111, 114, 97, 0, 0, 0, 115,
             0, 0, 0, 0, 101, 129, 113, 138, 119, 1, 98, 97, 1,
         ];
-        let m = Map::from(&enc[..]);
+        let m = Map::from_slice(enc);
         println!("{:?}", m);
     }
 
@@ -1518,22 +1594,22 @@ mod test {
         let enc = [
             108, 0, 0, 0, 1, 108, 0, 0, 0, 2, 119, 1, 97, 119, 1, 98, 106, 119, 1, 99,
         ];
-        let l = List::from(&enc[..]);
+        let l = List::from_slice(enc).unwrap();
         println!("{:?}", l);
         let tail = SmallAtomUtf8::try_from(*l.tail).unwrap();
         assert_eq!(tail.0, "c");
         let enc = [108, 0, 0, 0, 2, 119, 1, 97, 119, 1, 98, 119, 1, 99];
-        let l = List::from(&enc[..]);
+        let l = List::from_slice(enc).unwrap();
         println!("{:?}", l);
         let enc = [108, 0, 0, 0, 2, 119, 1, 97, 119, 1, 98, 106];
-        let l = Term::from(&enc[..]);
+        let l = Term::from_slice(enc).unwrap();
         println!("{:?}", l);
     }
 
     #[test]
     fn small_big() {
         let enc = vec![110, 6, 0, 179, 115, 4, 214, 250, 111];
-        let s = SmallBig::from(&enc[..]);
+        let s = SmallBig::from_slice(&enc).unwrap();
         println!("{:?}", s);
         let mut expect = vec![];
         s.encode(&mut expect).unwrap();
@@ -1546,7 +1622,7 @@ mod test {
         // <<3::5, 6::5, 7::3>> =>
         // <<25, 23::size(5)>>
         let enc = vec![77, 0, 0, 0, 2, 5, 25, 184];
-        let b = BitBinary::from(&enc[..]);
+        let b = BitBinary::from_slice(&enc).unwrap();
         assert_eq!(b.length, 2);
         assert_eq!(b.bits, 5);
         assert_eq!(b.data, vec![25, 23]);
@@ -1572,7 +1648,7 @@ mod test {
             97, 131, 119, 4, 95, 98, 64, 49, 106, 106,
         ];
 
-        let f = NewFun::from(&enc[..]);
+        let f = NewFun::from_slice(enc).unwrap();
         assert_eq!(f.module.0, "erl_eval");
         assert_eq!(f.free_vars.len(), 1);
         assert_eq!(f.pid.node.0, "a@fedora");
