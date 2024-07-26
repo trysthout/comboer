@@ -9,7 +9,7 @@ use dashmap::DashMap;
 use futures_util::StreamExt;
 use motore::{BoxCloneService, Service};
 
-use proto::{CtrlFromSlice, CtrlMsg, Encoder, Len, term, TermFromSlice};
+use proto::{CtrlMsg, Decoder, Encoder, Len, term};
 
 use crate::{BoxStream, Error, RawMsg, Request, Response};
 
@@ -234,8 +234,8 @@ where
         + Sync
         + 'static,
     S::Error: Into<crate::Error>,
-    T1: CtrlFromSlice<Error = anyhow::Error> + Len + Send + Sync + Clone + Debug + 'static,
-    T2: TermFromSlice<Error = anyhow::Error> + Len + Send + Sync + Clone + Debug + 'static,
+    T1: Decoder<Error = anyhow::Error> + Len + Send + Sync + Clone + Debug + 'static,
+    T2: Decoder<Error = anyhow::Error> + Len + Send + Sync + Clone + Debug + 'static,
     U: Encoder<Error = anyhow::Error> + Len + Send + Sync + Debug + 'static,
     C: Send + Sync,
 {

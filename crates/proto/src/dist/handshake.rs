@@ -126,7 +126,7 @@ impl HandshakeCodec {
         //buf.put_u64(0x0000000d07df7fbd);
         buf.put_u32(self.creation);
         buf.put_u16(self.local_node_name.len() as u16);
-        //buf.extend_from_slice(self.node_name.as_bytes());
+        //buf.extend_decode(self.node_name.as_bytes());
         buf.put_slice(self.local_node_name.as_bytes());
         packet_length
     }
@@ -149,7 +149,7 @@ impl HandshakeCodec {
         let packet_length = self.encode_length(3, buf);
         //let packet_length = 5;
         //buf.put_u16(3);
-        //buf[2..5].copy_from_slice(b"sok");
+        //buf[2..5].copy_decode(b"sok");
         buf.put_slice(b"sok");
         packet_length
     }

@@ -177,6 +177,12 @@ pub struct EpmdServer {
     nodes: Arc<DashMap<String, RegisterNodeReq>>,
 }
 
+impl Default for EpmdServer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EpmdServer {
     pub fn new() -> Self {
         Self {

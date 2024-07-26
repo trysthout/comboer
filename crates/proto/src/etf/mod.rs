@@ -1,5 +1,5 @@
-pub use de::{Deserializer, from_term};
-pub use ser::{Serializer, to_term};
+pub use de::{from_term, Deserializer};
+pub use ser::{to_term, Serializer};
 
 mod de;
 mod error;
@@ -79,7 +79,7 @@ impl From<&Sign> for num_bigint::Sign {
     }
 }
 
-pub trait TermFromSlice: Sized {
-    type Error;
-    fn from_slice<T: AsRef<[u8]>>(slice: T) -> Result<Self, Self::Error>;
-}
+//pub trait TermFromSlice: Sized {
+//    type Error;
+//    fn decode<T: AsRef<[u8]>>(slice: T) -> Result<Self, Self::Error>;
+//}

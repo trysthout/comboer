@@ -1,5 +1,9 @@
-use crate::term::PidOrAtom;
 use bitflags::bitflags;
+
+pub use ctrl::*;
+pub use epmd::*;
+
+use crate::term::PidOrAtom;
 
 bitflags! {
     #[derive(Debug, Clone)]
@@ -103,15 +107,11 @@ pub trait ProcessKind {
     fn get_to_pid_atom(&self) -> Option<PidOrAtom>;
 }
 
-pub trait CtrlFromSlice: Sized {
-    type Error;
-    fn from_slice<T: AsRef<[u8]>>(slice: T) -> Result<Self, Self::Error>;
-}
-
+//pub trait Decoder: Sized {
+//    type Error;
+//    fn decode<T: AsRef<[u8]>>(slice: T) -> Result<Self, Self::Error>;
+//}
 
 pub mod ctrl;
-pub use ctrl::*;
 pub mod epmd;
-pub use epmd::*;
-
 pub mod handshake;

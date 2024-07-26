@@ -2,9 +2,7 @@ use std::io::Write;
 
 use bytes::Buf;
 
-use crate::{
-    CtrlFromSlice, dist::OpCode, Encoder, etf::term::*, Len, ProcessKind, term, TermFromSlice,
-};
+use crate::{Decoder, dist::OpCode, Encoder, etf::term::*, Len, ProcessKind, term};
 
 macro_rules! define_ctrl {
     (
@@ -26,9 +24,9 @@ macro_rules! define_ctrl {
             const ARITY: u8 = $num;
         }
 
-        impl CtrlFromSlice for $sn {
+        impl Decoder for $sn {
             type Error = anyhow::Error;
-            fn from_slice<T: AsRef<[u8]>>(value: T) -> Result<Self, Self::Error> {
+            fn decode<T: AsRef<[u8]>>(value: T) -> Result<Self, Self::Error> {
                 let mut value = value.as_ref();
                 if value[3] != Self::CODE {
                     return Err(anyhow::anyhow!("invalid tag, expected tag: {}, real tag: {}", Self::CODE, value[3]))
@@ -39,11 +37,11 @@ macro_rules! define_ctrl {
                 // SmallTuple arity
                 value.get_u8();
 
-                let code  = SmallInteger::from_slice(value)?;
+                let code  = SmallInteger::decode(value)?;
                 value.advance(code.len());
 
                 $(
-                    let $f = <$ft>::from_slice(value)?;
+                    let $f = <$ft>::decode(value)?;
                     value.advance($f.len());
                 )*
 
@@ -539,10 +537,10 @@ impl Encoder for MFA {
     }
 }
 
-impl CtrlFromSlice for MFA {
+impl Decoder for MFA {
     type Error = anyhow::Error;
-    fn from_slice<T: AsRef<[u8]>>(value: T) -> Result<Self, Self::Error> {
-        let tuple = SmallTuple::from_slice(value)?;
+    fn decode<T: AsRef<[u8]>>(value: T) -> Result<Self, Self::Error> {
+        let tuple = SmallTuple::decode(value)?;
         let module: SmallAtomUtf8 = tuple.elems[0].clone().try_into().unwrap();
         let fun: SmallAtomUtf8 = tuple.elems[1].clone().try_into().unwrap();
         let arity: SmallInteger = tuple.elems[2].clone().try_into().unwrap();
@@ -808,12 +806,12 @@ macro_rules! impl_ctrl {
            }
         }
 
-        impl CtrlFromSlice for Ctrl {
+        impl Decoder for Ctrl {
             type Error = anyhow::Error;
-            fn from_slice<T: AsRef<[u8]>>(value: T) -> Result<Self, Self::Error> {
+            fn decode<T: AsRef<[u8]>>(value: T) -> Result<Self, Self::Error> {
                let value = value.as_ref();
                 match value[3] {
-                    $($t::CODE => Ok(Self::$t($t::from_slice(value)?)),)+
+                    $($t::CODE => Ok(Self::$t($t::decode(value)?)),)+
                     _ => Err(anyhow::anyhow!("cannot convert value type to CtrlMsg"))
                }
             }
@@ -970,8 +968,8 @@ where
 
 impl<T, U> TryFrom<&[u8]> for CtrlMsg<T, U>
 where
-    T: CtrlFromSlice<Error = anyhow::Error> + Len,
-    U: TermFromSlice<Error = anyhow::Error> + Len,
+    T: Decoder<Error = anyhow::Error> + Len,
+    U: Decoder<Error = anyhow::Error> + Len,
 {
     type Error = anyhow::Error;
     fn try_from(mut value: &[u8]) -> Result<Self, Self::Error> {
@@ -979,15 +977,15 @@ where
         value.get_u8();
         // 131
         value.get_u8();
-        let ctrl = T::from_slice(value)?;
+        let ctrl = T::decode(value)?;
         value.advance(ctrl.len());
 
         let msg = match value.is_empty() {
-            true => U::from_slice([term::Nil::TAG])?,
+            true => U::decode([term::Nil::TAG])?,
             false => {
                 // 131
                 value.get_u8();
-                let term = U::from_slice(value)?;
+                let term = U::decode(value)?;
                 value.advance(term.len());
                 term
             }
@@ -1021,7 +1019,7 @@ mod test {
             104, 3, 97, 2, 119, 0, 88, 119, 8, 97, 64, 102, 101, 100, 111, 114, 97, 0, 0, 0, 116,
             0, 0, 0, 0, 101, 136, 14, 0,
         ];
-        let s = SendCtrl::from_slice(&buf).unwrap();
+        let s = SendCtrl::decode(&buf).unwrap();
         println!("{:?}", s);
         assert_eq!(s.unused.0, "");
         assert_eq!(s.to.id, 116);
