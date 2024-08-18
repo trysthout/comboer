@@ -65,7 +65,7 @@ pub struct HandshakeCodec {
     pub local_node_name: String,
     pub remote_node_name: String,
     pub creation: u32,
-    pub tls: bool,
+    pub is_tls: bool,
     pub status: Status,
     pub local_challenge: u32,
     pub remote_challenge: u32,
@@ -73,11 +73,11 @@ pub struct HandshakeCodec {
 }
 
 impl HandshakeCodec {
-    pub fn new(node_name: String, cookie: String) -> HandshakeCodec {
+    pub fn new(node_name: String, cookie: String, is_tls: bool) -> HandshakeCodec {
         Self {
             version: HandshakeVersion::V6,
             dflags: DistFlags::default(),
-            tls: false,
+            is_tls,
             local_node_name: node_name,
             remote_node_name: "".to_string(),
             cookie,
@@ -268,7 +268,7 @@ impl HandshakeCodec {
     }
 
     fn encode_length(&self, length: usize, buf: &mut &mut [u8]) -> usize {
-        if self.tls {
+        if self.is_tls {
             buf.put_u32(length as u32);
             4 + length
         } else {

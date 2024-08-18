@@ -3,9 +3,11 @@ use motore::Service;
 use tokio_stream::wrappers::ReceiverStream;
 
 use proto::{
-    CtrlMsg, etf::term, ProcessKind, SendSender, SpawnReply, SpawnRequest, term::PidOrAtom,
+    etf::term, term::PidOrAtom, CtrlMsg, ProcessKind, SendSender, SpawnReply, SpawnRequest,
 };
-use server::{BoxStream, EmptyBoxCx, NodeAsServer, ProcessContext, Request, Response};
+use server::{
+    BoxStream, EmptyBoxCx, NodeAsServer, ProcessContext, Request, Response, ServerTlsConfig,
+};
 
 #[derive(Debug, Clone)]
 struct C(term::NewPid);
@@ -95,8 +97,14 @@ impl Service<ProcessContext<EmptyBoxCx>, Request<CtrlMsg<SpawnRequest, term::Nil
 
 #[tokio::main]
 async fn main() {
+    let tls_config = ServerTlsConfig::from_pem_file("server.pem", "server-key.pem").unwrap();
     let s = server::ServiceBuilder::new(B).build();
-    let node =
-        NodeAsServer::new("rust".to_string(), "aaa".to_string(), "127.0.0.1:4369").add_matcher(s);
+    let node = NodeAsServer::new(
+        "rust".to_string(),
+        "aaa".to_string(),
+        "127.0.0.1:4369",
+        Some(tls_config),
+    )
+    .add_matcher(s);
     node.listen().await.unwrap();
 }

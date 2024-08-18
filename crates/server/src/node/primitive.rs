@@ -1,25 +1,29 @@
+use byteorder::{BigEndian, ByteOrder};
+use motore::Service;
+use proto::{
+    handshake::{HandshakeCodec, HandshakeVersion, Status},
+    EpmdClient,
+};
+use rustls::ServerConfig;
+use std::path::Path;
+use std::sync::Arc;
 use std::{
     fmt::Debug,
+    io,
     net::{Ipv4Addr, SocketAddrV4},
     time::SystemTime,
 };
-
-use byteorder::{BigEndian, ByteOrder};
-use motore::Service;
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
 };
+use tokio_rustls::TlsAcceptor;
 
-use proto::{
-    EpmdClient,
-    handshake::{HandshakeCodec, HandshakeVersion, Status},
-};
-
+use crate::node::conn::{ConnStream, Connection};
 use crate::{
-    Dispatcher, MatchId, node::get_short_hostname, ProcessContext, RawMsg, Request, Response,
+    node::get_short_hostname, Dispatcher, MatchId, ProcessContext, RawMsg, Request, Response,
 };
-use crate::node::conn::Connection;
 
 use super::Error;
 
@@ -92,7 +96,8 @@ where
         let addr = SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), node.port);
         let mut stream = TcpStream::connect(addr).await.unwrap();
         let _ = stream.set_nodelay(true);
-        let handshake_codec = HandshakeCodec::new(self.node_name.clone(), self.cookie.clone());
+        let handshake_codec =
+            HandshakeCodec::new(self.node_name.clone(), self.cookie.clone(), false);
         self.client_handshake(handshake_codec, &mut stream).await?;
         // let (internal_tx, internal_rx) = unbounded_channel::<CtrlMsg>();
         // self.internal_tx = Some(internal_tx.clone());
@@ -172,15 +177,45 @@ where
     }
 }
 
-#[derive(Debug)]
-pub struct ServerConfig {}
+#[derive(Clone)]
+pub struct ServerTlsConfig {
+    acceptor: TlsAcceptor,
+}
 
-#[derive(Debug)]
+impl ServerTlsConfig {
+    pub fn from_pem(cert: Vec<u8>, key: Vec<u8>) -> Result<Self, Error> {
+        let certs =
+            rustls_pemfile::certs(&mut cert.as_ref()).collect::<std::io::Result<Vec<_>>>()?;
+        let key = rustls_pemfile::private_key(&mut key.as_ref())?
+            // .into_iter()
+            // .collect::<std::io::Result<Vec<_>>>()?
+            // .pop()
+            // .map(PrivateKeyDer::Pkcs8)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "No private key found"))?;
+
+        let server_config = ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(certs, key)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+
+        Ok(ServerTlsConfig {
+            acceptor: TlsAcceptor::from(Arc::new(server_config)),
+        })
+    }
+
+    pub fn from_pem_file<T: AsRef<Path>>(cert_file: T, key_file: T) -> Result<Self, Error> {
+        let cert = std::fs::read(cert_file)?;
+        let key = std::fs::read(key_file)?;
+        Self::from_pem(cert, key)
+    }
+}
+
 pub struct NodeAsServer<C> {
     pub is_tls: bool,
     pub node_name: String,
     pub cookie: String,
     pub creation: u32,
+    server_tls_config: Option<ServerTlsConfig>,
     epmd_addr: &'static str,
     dispatcher: Dispatcher<C>,
 }
@@ -189,7 +224,12 @@ impl<C> NodeAsServer<C>
 where
     C: Debug + Clone + Send + Sync + 'static,
 {
-    pub fn new(node_name: String, cookie: String, epmd_addr: &'static str) -> Self {
+    pub fn new(
+        node_name: String,
+        cookie: String,
+        epmd_addr: &'static str,
+        server_tls_config: Option<ServerTlsConfig>,
+    ) -> Self {
         let creation = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap()
@@ -201,6 +241,7 @@ where
             is_tls: false,
             dispatcher: Dispatcher::new(),
             epmd_addr,
+            server_tls_config,
         }
     }
 
@@ -225,6 +266,7 @@ where
             is_tls: self.is_tls,
             dispatcher: self.dispatcher,
             epmd_addr: self.epmd_addr,
+            server_tls_config: self.server_tls_config,
         }
     }
 
@@ -243,7 +285,11 @@ where
 
         self.node_name.push('@');
         self.node_name.push_str(&get_short_hostname());
-        let handshake_codec = HandshakeCodec::new(self.node_name.clone(), self.cookie.clone());
+        let handshake_codec = HandshakeCodec::new(
+            self.node_name.clone(),
+            self.cookie.clone(),
+            self.server_tls_config.is_some(),
+        );
 
         loop {
             let node_name = self.node_name.clone();
@@ -251,20 +297,35 @@ where
             let creation = self.creation;
             let handshake_codec = handshake_codec.clone();
             let dispatcher = self.dispatcher.clone();
+            let is_tls = self.server_tls_config.as_ref().is_some();
 
             tokio::select! {
                 res = listener.accept() => {
                     match res {
-                        Ok((mut stream, _)) => {
+                        Ok((stream, _)) => {
+                            let mut conn_stream = match self.server_tls_config.as_ref().map(|s| &s.acceptor) {
+                                Some(tls_accepter) => {
+                                    let tls_stream = match tls_accepter.accept(stream).await {
+                                        Ok(stream) => stream,
+                                        Err(e) => {
+                                            println!("tls handshake error {:?}", e);
+                                            continue;
+                                        }
+                                    };
+                                    ConnStream::Rustls(tokio_rustls::TlsStream::from(tls_stream))
+                                },
+                                None => ConnStream::Tcp(stream)
+                            };
+
                             tokio::spawn(
                                 async move {
-                                    if let Err(err) = Self::server_handshake(self.is_tls, handshake_codec.clone(), &mut stream).await {
+                                    if let Err(err) = Self::server_handshake(is_tls, handshake_codec.clone(), &mut conn_stream).await {
                                         println!("error {:?}", err);
                                         return;
                                     }
 
                                     let cx = ProcessContext::with_dispatcher(node_name, creation, dispatcher);
-                                    let mut conn = Connection::new(&mut stream, cx);
+                                    let mut conn = Connection::new(&mut conn_stream, cx);
                                     let _ = conn.serving().await;
                                 }
                             );
@@ -278,11 +339,14 @@ where
         }
     }
 
-    async fn server_handshake(
+    async fn server_handshake<T>(
         is_tls: bool,
         mut handshake_codec: HandshakeCodec,
-        stream: &mut TcpStream,
-    ) -> Result<(), Error> {
+        stream: &mut T,
+    ) -> Result<(), Error>
+    where
+        T: AsyncRead + AsyncWrite + Unpin,
+    {
         let mut buf = vec![0; 512];
         let header_length = if is_tls { 4 } else { 2 };
         loop {
@@ -290,7 +354,8 @@ where
             let length = read_length(header_length, &buf);
             // ERLANG_TICK
             if length == 0 {
-                return Ok(());
+                // return Ok(());
+                continue;
             }
             if length > buf.len() {
                 buf.resize(length, 0);

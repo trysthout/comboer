@@ -1,24 +1,97 @@
-use std::fmt::Debug;
-
 use byteorder::{BigEndian, ByteOrder};
 use futures_util::StreamExt;
 use motore::Service;
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use pin_project::pin_project;
+use std::fmt::Debug;
+use std::io;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
+use tokio::net::TcpStream;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 use proto::{CtrlMsg, Encoder, Len};
 
 use crate::{Error, ProcessContext, Request};
 
-pin_project_lite::pin_project! {
-    #[derive(Debug)]
-    pub struct Connection<T, C> {
-        conn: Option<T>,
-        buf: Vec<u8>,
-        cx: ProcessContext<C>,
-        tx: UnboundedSender<Vec<u8>>,
-        rx: Option<UnboundedReceiver<Vec<u8>>>,
+#[pin_project(project = ConnStreamProj)]
+pub enum ConnStream {
+    Tcp(#[pin] TcpStream),
+    Rustls(#[pin] tokio_rustls::TlsStream<TcpStream>),
+}
+
+impl AsyncRead for ConnStream {
+    #[inline]
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<Result<(), io::Error>> {
+        match self.project() {
+            ConnStreamProj::Tcp(stream) => stream.poll_read(cx, buf),
+            ConnStreamProj::Rustls(stream) => stream.poll_read(cx, buf),
+        }
     }
+}
+
+impl AsyncWrite for ConnStream {
+    #[inline]
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context,
+        buf: &[u8],
+    ) -> Poll<Result<usize, io::Error>> {
+        match self.project() {
+            ConnStreamProj::Tcp(stream) => stream.poll_write(cx, buf),
+            ConnStreamProj::Rustls(stream) => stream.poll_write(cx, buf),
+        }
+    }
+
+    #[inline]
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), io::Error>> {
+        match self.project() {
+            ConnStreamProj::Tcp(stream) => stream.poll_flush(cx),
+            ConnStreamProj::Rustls(stream) => stream.poll_flush(cx),
+        }
+    }
+
+    #[inline]
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), io::Error>> {
+        match self.project() {
+            ConnStreamProj::Tcp(stream) => stream.poll_shutdown(cx),
+            ConnStreamProj::Rustls(stream) => stream.poll_shutdown(cx),
+        }
+    }
+
+    #[inline]
+    fn poll_write_vectored(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        bufs: &[io::IoSlice<'_>],
+    ) -> Poll<Result<usize, io::Error>> {
+        match self.project() {
+            ConnStreamProj::Tcp(stream) => stream.poll_write_vectored(cx, bufs),
+            ConnStreamProj::Rustls(stream) => stream.poll_write_vectored(cx, bufs),
+        }
+    }
+
+    #[inline]
+    fn is_write_vectored(&self) -> bool {
+        match self {
+            Self::Tcp(stream) => stream.is_write_vectored(),
+            Self::Rustls(stream) => stream.is_write_vectored(),
+        }
+    }
+}
+
+#[pin_project]
+#[derive(Debug)]
+pub struct Connection<T, C> {
+    conn: Option<T>,
+    buf: Vec<u8>,
+    cx: ProcessContext<C>,
+    tx: UnboundedSender<Vec<u8>>,
+    rx: Option<UnboundedReceiver<Vec<u8>>>,
 }
 
 impl<T, C> Connection<T, C>
