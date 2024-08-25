@@ -4,7 +4,7 @@ use proto::{
     handshake::{HandshakeCodec, HandshakeVersion, Status},
     EpmdClient,
 };
-use rustls::ServerConfig;
+use rustls::{pki_types, ClientConfig, ServerConfig};
 use std::path::Path;
 use std::sync::Arc;
 use std::{
@@ -18,7 +18,7 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
 };
-use tokio_rustls::TlsAcceptor;
+use tokio_rustls::{TlsAcceptor, TlsConnector};
 
 use crate::node::conn::{ConnStream, Connection};
 use crate::{
@@ -27,7 +27,43 @@ use crate::{
 
 use super::Error;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
+pub struct ClientTlsConfig {
+    tls_connector: TlsConnector,
+}
+
+impl ClientTlsConfig {
+    pub fn from_pem(pems: Vec<Vec<u8>>) -> Result<Self, Error> {
+        let mut root_cert_store = rustls::RootCertStore::empty();
+        if pems.is_empty() {
+            for mut pem in pems {
+                for cert in rustls_pemfile::certs(&mut pem.as_ref()) {
+                    root_cert_store
+                        .add(cert?)
+                        .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+                }
+            }
+        } else {
+            root_cert_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+        }
+
+        let client_config = ClientConfig::builder()
+            .with_root_certificates(root_cert_store)
+            .with_no_client_auth();
+        let tls_connector = TlsConnector::from(Arc::new(client_config));
+        Ok(Self { tls_connector })
+    }
+
+    pub fn from_pem_file<T: AsRef<Path>>(paths: Vec<T>) -> Result<Self, Error> {
+        let pems = paths
+            .iter()
+            .map(|p| std::fs::read(p))
+            .collect::<Result<Vec<Vec<u8>>, io::Error>>()?;
+        Self::from_pem(pems)
+    }
+}
+
+#[derive(Clone)]
 pub struct NodeAsClient<C> {
     pub is_tls: bool,
     pub node_name: String,
@@ -36,13 +72,19 @@ pub struct NodeAsClient<C> {
     epmd_addr: &'static str,
     // internal_tx: Option<UnboundedSender<CtrlMsg>>,
     dispatcher: Dispatcher<C, Vec<u8>>,
+    client_tls_config: Option<ClientTlsConfig>,
 }
 
 impl<C> NodeAsClient<C>
 where
     C: Clone + Debug + Sync + Send,
 {
-    pub fn new(node_name: String, cookie: String, epmd_addr: &'static str) -> Self {
+    pub fn new(
+        node_name: String,
+        cookie: String,
+        epmd_addr: &'static str,
+        client_tls_config: Option<ClientTlsConfig>,
+    ) -> Self {
         let creation = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap()
@@ -51,10 +93,11 @@ where
             node_name,
             cookie,
             creation,
-            is_tls: false,
+            is_tls: client_tls_config.is_some(),
             // internal_tx: None,
             dispatcher: Dispatcher::new(),
             epmd_addr,
+            client_tls_config,
         }
     }
 
@@ -76,13 +119,14 @@ where
             // internal_tx: self.internal_tx,
             dispatcher: self.dispatcher,
             epmd_addr: self.epmd_addr,
+            client_tls_config: self.client_tls_config,
         }
     }
 
     pub async fn connect_local_by_name(
         self,
         remote_node_name: &str,
-    ) -> Result<Connection<TcpStream, C>, Error> {
+    ) -> Result<Connection<ConnStream, C>, Error> {
         let mut epmd_client = EpmdClient::new(self.epmd_addr).await?;
         let nodes = epmd_client.req_names().await?.nodes;
         let node = nodes
@@ -94,13 +138,30 @@ where
 
         //let mut node = Node::new(false);
         let addr = SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), node.port);
-        let mut stream = TcpStream::connect(addr).await.unwrap();
+
+        let handshake_codec = HandshakeCodec::new(
+            self.node_name.clone(),
+            self.cookie.clone(),
+            self.client_tls_config.is_some(),
+        );
+        let stream = TcpStream::connect(addr).await?;
         let _ = stream.set_nodelay(true);
-        let handshake_codec =
-            HandshakeCodec::new(self.node_name.clone(), self.cookie.clone(), false);
-        self.client_handshake(handshake_codec, &mut stream).await?;
-        // let (internal_tx, internal_rx) = unbounded_channel::<CtrlMsg>();
-        // self.internal_tx = Some(internal_tx.clone());
+        let mut conn_stream = if let Some(client_tls_config) = &self.client_tls_config {
+            let domain = pki_types::ServerName::try_from(remote_node_name)
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?
+                .to_owned();
+            ConnStream::Rustls(tokio_rustls::TlsStream::from(
+                client_tls_config
+                    .tls_connector
+                    .connect(domain, stream)
+                    .await?,
+            ))
+        } else {
+            ConnStream::Tcp(stream)
+        };
+
+        self.client_handshake(handshake_codec, &mut conn_stream)
+            .await?;
 
         let cx = ProcessContext::with_dispatcher(
             self.node_name.clone(),
@@ -108,15 +169,17 @@ where
             self.dispatcher.clone(),
         );
 
-        let conn = Connection::new(stream, cx.clone());
-        Ok(conn)
+        Ok(Connection::new(conn_stream, cx.clone()))
     }
 
-    async fn client_handshake(
+    async fn client_handshake<T>(
         &self,
         mut handshake_codec: HandshakeCodec,
-        stream: &mut TcpStream,
-    ) -> Result<(), Error> {
+        stream: &mut T,
+    ) -> Result<(), Error>
+    where
+        T: AsyncRead + AsyncWrite + Unpin,
+    {
         let mut buf = vec![0; 512];
         let n = handshake_codec.encode_v6_name(&mut &mut buf[..]);
         stream.write_all(&buf[..n]).await?;
@@ -187,10 +250,6 @@ impl ServerTlsConfig {
         let certs =
             rustls_pemfile::certs(&mut cert.as_ref()).collect::<std::io::Result<Vec<_>>>()?;
         let key = rustls_pemfile::private_key(&mut key.as_ref())?
-            // .into_iter()
-            // .collect::<std::io::Result<Vec<_>>>()?
-            // .pop()
-            // .map(PrivateKeyDer::Pkcs8)
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "No private key found"))?;
 
         let server_config = ServerConfig::builder()

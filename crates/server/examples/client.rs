@@ -3,9 +3,12 @@ use std::sync::Arc;
 use motore::Service;
 use tokio::sync::mpsc::UnboundedSender;
 
-use proto::{CtrlMsg, Encoder, etf::term, RegSend, SendSender};
 use proto::term::{SmallAtomUtf8, SmallTuple};
-use server::{BoxStream, NodeAsClient, Process, ProcessContext, Request, Response, ServiceBuilder};
+use proto::{etf::term, CtrlMsg, Encoder, RegSend, SendSender};
+use server::{
+    BoxStream, NodeAsClient, Process, ProcessContext, Request, Response,
+    ServiceBuilder,
+};
 
 struct A {
     sender: UnboundedSender<Vec<u8>>,
@@ -52,6 +55,7 @@ async fn main() -> Result<(), server::Error> {
         "rust@fedora".to_string(),
         "aaa".to_string(),
         "127.0.0.1:4369",
+        None,
     )
     .connect_local_by_name("a")
     .await?;
