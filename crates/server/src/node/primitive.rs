@@ -1,15 +1,16 @@
+use crate::node::conn::{ConnStream, Connection};
+use crate::{
+    node::get_short_hostname, Dispatcher, MatchId, ProcessContext, RawMsg, Request, Response,
+};
 use byteorder::{BigEndian, ByteOrder};
 use motore::Service;
 use proto::{
     handshake::{HandshakeCodec, HandshakeVersion, Status},
     EpmdClient,
 };
-use rustls::{pki_types, ClientConfig, ServerConfig};
-use std::path::Path;
-use std::sync::Arc;
+
 use std::{
     fmt::Debug,
-    io,
     net::{Ipv4Addr, SocketAddrV4},
     time::SystemTime,
 };
@@ -18,21 +19,22 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
 };
-use tokio_rustls::{TlsAcceptor, TlsConnector};
 
-use crate::node::conn::{ConnStream, Connection};
-use crate::{
-    node::get_short_hostname, Dispatcher, MatchId, ProcessContext, RawMsg, Request, Response,
-};
+#[cfg(feature = "rustls")]
+use rustls::ServerConfig;
+#[cfg(feature = "native-tls")]
+use tokio_native_tls::native_tls::{self, Identity};
 
-use super::Error;
+use super::{conn, Error};
 
+#[allow(dead_code)]
 #[derive(Clone)]
 pub struct ClientTlsConfig {
-    tls_connector: TlsConnector,
+    tls_connector: conn::TlsConnector,
 }
 
 impl ClientTlsConfig {
+    #[cfg(feature = "rustls")]
     pub fn from_pem(pems: Vec<Vec<u8>>) -> Result<Self, Error> {
         let mut root_cert_store = rustls::RootCertStore::empty();
         if pems.is_empty() {
@@ -47,18 +49,38 @@ impl ClientTlsConfig {
             root_cert_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
         }
 
-        let client_config = ClientConfig::builder()
+        let client_config = rustls::ClientConfig::builder()
             .with_root_certificates(root_cert_store)
             .with_no_client_auth();
-        let tls_connector = TlsConnector::from(Arc::new(client_config));
-        Ok(Self { tls_connector })
+        let tls_connector = tokio_rustls::TlsConnector::from(Arc::new(client_config));
+        Ok(Self {
+            tls_connector: conn::TlsConnector::Rustls(tls_connector),
+        })
     }
 
-    pub fn from_pem_file<T: AsRef<Path>>(paths: Vec<T>) -> Result<Self, Error> {
+    #[cfg(feature = "native-tls")]
+    pub fn from_pem(pems: Vec<Vec<u8>>) -> Result<Self, Error> {
+        let mut builder = tokio_native_tls::native_tls::TlsConnector::builder();
+        for pem in pems {
+            let cert = tokio_native_tls::native_tls::Certificate::from_pem(pem.as_ref())
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
+            builder.add_root_certificate(cert);
+        }
+        let tls_connector = builder.danger_accept_invalid_certs(true).build().unwrap();
+
+        Ok(Self {
+            tls_connector: conn::TlsConnector::Nativetls(tokio_native_tls::TlsConnector::from(
+                tls_connector,
+            )),
+        })
+    }
+
+    #[cfg(feature = "tls")]
+    pub fn from_pem_file<T: AsRef<std::path::Path>>(paths: Vec<T>) -> Result<Self, Error> {
         let pems = paths
             .iter()
             .map(|p| std::fs::read(p))
-            .collect::<Result<Vec<Vec<u8>>, io::Error>>()?;
+            .collect::<Result<Vec<Vec<u8>>, std::io::Error>>()?;
         Self::from_pem(pems)
     }
 }
@@ -146,18 +168,21 @@ where
         );
         let stream = TcpStream::connect(addr).await?;
         let _ = stream.set_nodelay(true);
+
+        #[allow(unused_mut)]
+        let mut conn_stream = ConnStream::Tcp(stream);
+        #[cfg(feature = "tls")]
         let mut conn_stream = if let Some(client_tls_config) = &self.client_tls_config {
-            let domain = pki_types::ServerName::try_from(remote_node_name)
-                .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?
-                .to_owned();
-            ConnStream::Rustls(tokio_rustls::TlsStream::from(
+            if let ConnStream::Tcp(stream) = conn_stream {
                 client_tls_config
                     .tls_connector
-                    .connect(domain, stream)
-                    .await?,
-            ))
+                    .connect(remote_node_name, stream)
+                    .await?
+            } else {
+                unreachable!()
+            }
         } else {
-            ConnStream::Tcp(stream)
+            unreachable!()
         };
 
         self.client_handshake(handshake_codec, &mut conn_stream)
@@ -240,12 +265,14 @@ where
     }
 }
 
+#[allow(dead_code)]
 #[derive(Clone)]
 pub struct ServerTlsConfig {
-    acceptor: TlsAcceptor,
+    acceptor: conn::TlsAcceptor,
 }
 
 impl ServerTlsConfig {
+    #[cfg(feature = "rustls")]
     pub fn from_pem(cert: Vec<u8>, key: Vec<u8>) -> Result<Self, Error> {
         let certs =
             rustls_pemfile::certs(&mut cert.as_ref()).collect::<std::io::Result<Vec<_>>>()?;
@@ -258,11 +285,31 @@ impl ServerTlsConfig {
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
 
         Ok(ServerTlsConfig {
-            acceptor: TlsAcceptor::from(Arc::new(server_config)),
+            acceptor: conn::TlsAcceptor::Rustls(tokio_rustls::TlsAcceptor::from(
+                std::sync::Arc::new(server_config),
+            )),
         })
     }
 
-    pub fn from_pem_file<T: AsRef<Path>>(cert_file: T, key_file: T) -> Result<Self, Error> {
+    #[cfg(feature = "native-tls")]
+    pub fn from_pem(cert: Vec<u8>, key: Vec<u8>) -> Result<Self, Error> {
+        let identity = Identity::from_pkcs8(&cert, &key)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
+        Ok(ServerTlsConfig {
+            acceptor: conn::TlsAcceptor::Nativetls(
+                native_tls::TlsAcceptor::builder(identity)
+                    .build()
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?
+                    .into(),
+            ),
+        })
+    }
+
+    #[cfg(feature = "tls")]
+    pub fn from_pem_file<T: AsRef<std::path::Path>>(
+        cert_file: T,
+        key_file: T,
+    ) -> Result<Self, Error> {
         let cert = std::fs::read(cert_file)?;
         let key = std::fs::read(key_file)?;
         Self::from_pem(cert, key)
@@ -362,18 +409,25 @@ where
                 res = listener.accept() => {
                     match res {
                         Ok((stream, _)) => {
+                            #[allow(unused_mut)]
+                            let mut conn_stream = ConnStream::Tcp(stream);
+                            #[cfg(feature = "tls")]
                             let mut conn_stream = match self.server_tls_config.as_ref().map(|s| &s.acceptor) {
                                 Some(tls_accepter) => {
-                                    let tls_stream = match tls_accepter.accept(stream).await {
-                                        Ok(stream) => stream,
-                                        Err(e) => {
-                                            println!("tls handshake error {:?}", e);
-                                            continue;
+                                    if let ConnStream::Tcp(stream) = conn_stream {
+                                        match tls_accepter.accept(stream).await {
+                                            Ok(stream) => stream,
+                                            Err(e) => {
+                                                println!("tls handshake error {:?}", e);
+                                                continue;
+                                            }
                                         }
-                                    };
-                                    ConnStream::Rustls(tokio_rustls::TlsStream::from(tls_stream))
+                                    } else {
+                                        unreachable!()
+                                    }
+
                                 },
-                                None => ConnStream::Tcp(stream)
+                                None => unreachable!(),
                             };
 
                             tokio::spawn(

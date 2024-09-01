@@ -1,7 +1,11 @@
+use crate::{Error, ProcessContext, Request};
 use byteorder::{BigEndian, ByteOrder};
 use futures_util::StreamExt;
 use motore::Service;
 use pin_project::pin_project;
+use proto::{CtrlMsg, Encoder, Len};
+#[cfg(feature = "rustls")]
+use rustls::pki_types::ServerName;
 use std::fmt::Debug;
 use std::io;
 use std::pin::Pin;
@@ -10,14 +14,13 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
-use proto::{CtrlMsg, Encoder, Len};
-
-use crate::{Error, ProcessContext, Request};
-
 #[pin_project(project = ConnStreamProj)]
 pub enum ConnStream {
     Tcp(#[pin] TcpStream),
+    #[cfg(feature = "rustls")]
     Rustls(#[pin] tokio_rustls::TlsStream<TcpStream>),
+    #[cfg(feature = "native-tls")]
+    Nativetls(#[pin] tokio_native_tls::TlsStream<TcpStream>),
 }
 
 impl AsyncRead for ConnStream {
@@ -29,7 +32,10 @@ impl AsyncRead for ConnStream {
     ) -> Poll<Result<(), io::Error>> {
         match self.project() {
             ConnStreamProj::Tcp(stream) => stream.poll_read(cx, buf),
+            #[cfg(feature = "rustls")]
             ConnStreamProj::Rustls(stream) => stream.poll_read(cx, buf),
+            #[cfg(feature = "native-tls")]
+            ConnStreamProj::Nativetls(stream) => stream.poll_read(cx, buf),
         }
     }
 }
@@ -43,7 +49,10 @@ impl AsyncWrite for ConnStream {
     ) -> Poll<Result<usize, io::Error>> {
         match self.project() {
             ConnStreamProj::Tcp(stream) => stream.poll_write(cx, buf),
+            #[cfg(feature = "rustls")]
             ConnStreamProj::Rustls(stream) => stream.poll_write(cx, buf),
+            #[cfg(feature = "native-tls")]
+            ConnStreamProj::Nativetls(stream) => stream.poll_write(cx, buf),
         }
     }
 
@@ -51,7 +60,10 @@ impl AsyncWrite for ConnStream {
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), io::Error>> {
         match self.project() {
             ConnStreamProj::Tcp(stream) => stream.poll_flush(cx),
+            #[cfg(feature = "rustls")]
             ConnStreamProj::Rustls(stream) => stream.poll_flush(cx),
+            #[cfg(feature = "native-tls")]
+            ConnStreamProj::Nativetls(stream) => stream.poll_flush(cx),
         }
     }
 
@@ -59,7 +71,10 @@ impl AsyncWrite for ConnStream {
     fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), io::Error>> {
         match self.project() {
             ConnStreamProj::Tcp(stream) => stream.poll_shutdown(cx),
+            #[cfg(feature = "rustls")]
             ConnStreamProj::Rustls(stream) => stream.poll_shutdown(cx),
+            #[cfg(feature = "native-tls")]
+            ConnStreamProj::Nativetls(stream) => stream.poll_shutdown(cx),
         }
     }
 
@@ -71,7 +86,10 @@ impl AsyncWrite for ConnStream {
     ) -> Poll<Result<usize, io::Error>> {
         match self.project() {
             ConnStreamProj::Tcp(stream) => stream.poll_write_vectored(cx, bufs),
+            #[cfg(feature = "rustls")]
             ConnStreamProj::Rustls(stream) => stream.poll_write_vectored(cx, bufs),
+            #[cfg(feature = "native-tls")]
+            ConnStreamProj::Nativetls(stream) => stream.poll_write_vectored(cx, bufs),
         }
     }
 
@@ -79,7 +97,74 @@ impl AsyncWrite for ConnStream {
     fn is_write_vectored(&self) -> bool {
         match self {
             Self::Tcp(stream) => stream.is_write_vectored(),
+            #[cfg(feature = "rustls")]
             Self::Rustls(stream) => stream.is_write_vectored(),
+            #[cfg(feature = "native-tls")]
+            Self::Nativetls(stream) => stream.is_write_vectored(),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub enum TlsConnector {
+    #[cfg(feature = "rustls")]
+    Rustls(tokio_rustls::TlsConnector),
+
+    #[cfg(feature = "native-tls")]
+    Nativetls(tokio_native_tls::TlsConnector),
+}
+
+impl TlsConnector {
+    #[cfg(feature = "tls")]
+    pub async fn connect(&self, domain: &str, stream: TcpStream) -> Result<ConnStream, Error> {
+        match self {
+            #[cfg(feature = "rustls")]
+            Self::Rustls(conn) => conn
+                .connect(
+                    ServerName::try_from(domain.to_owned())
+                        .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?,
+                    stream,
+                )
+                .await
+                .map_err(|e| Error::from(e))
+                .map(tokio_rustls::TlsStream::Client)
+                .map(ConnStream::Rustls),
+            #[cfg(feature = "native-tls")]
+            Self::Nativetls(conn) => conn
+                .connect(domain, stream)
+                .await
+                .map(ConnStream::Nativetls)
+                .map_err(|e| Error::from(io::Error::new(io::ErrorKind::ConnectionRefused, e))),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub enum TlsAcceptor {
+    #[cfg(feature = "rustls")]
+    Rustls(tokio_rustls::TlsAcceptor),
+
+    #[cfg(feature = "native-tls")]
+    Nativetls(tokio_native_tls::TlsAcceptor),
+}
+
+impl TlsAcceptor {
+    #[cfg(feature = "tls")]
+    pub async fn accept(&self, stream: TcpStream) -> Result<ConnStream, Error> {
+        match self {
+            #[cfg(feature = "rustls")]
+            Self::Rustls(acceptor) => acceptor
+                .accept(stream)
+                .await
+                .map_err(Error::from)
+                .map(tokio_rustls::TlsStream::Server)
+                .map(ConnStream::Rustls),
+            #[cfg(feature = "native-tls")]
+            Self::Nativetls(acceptor) => acceptor
+                .accept(stream)
+                .await
+                .map(ConnStream::Nativetls)
+                .map_err(|e| Error::from(io::Error::new(io::ErrorKind::ConnectionAborted, e))),
         }
     }
 }

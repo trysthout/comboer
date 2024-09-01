@@ -5,10 +5,7 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use proto::term::{SmallAtomUtf8, SmallTuple};
 use proto::{etf::term, CtrlMsg, Encoder, RegSend, SendSender};
-use server::{
-    BoxStream, NodeAsClient, Process, ProcessContext, Request, Response,
-    ServiceBuilder,
-};
+use server::{BoxStream, NodeAsClient, Process, ProcessContext, Request, Response, ServiceBuilder};
 
 struct A {
     sender: UnboundedSender<Vec<u8>>,
@@ -51,6 +48,10 @@ impl Service<ProcessContext<BoxCx>, Request<CtrlMsg<SendSender, SmallAtomUtf8>>>
 
 #[tokio::main]
 async fn main() -> Result<(), server::Error> {
+    // let tls_config = server::ClientTlsConfig::from_pem_file(vec![
+    //     "/home/wjd/test-cert/rcgen/rustls-cert-gen/root-ca.pem",
+    //     "/home/wjd/test-cert/rcgen/rustls-cert-gen/cert.pem",
+    // ])?;
     let mut conn = NodeAsClient::new(
         "rust@fedora".to_string(),
         "aaa".to_string(),
