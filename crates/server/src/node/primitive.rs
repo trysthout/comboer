@@ -37,12 +37,12 @@ impl ClientTlsConfig {
     #[cfg(feature = "rustls")]
     pub fn from_pem(pems: Vec<Vec<u8>>) -> Result<Self, Error> {
         let mut root_cert_store = rustls::RootCertStore::empty();
-        if pems.is_empty() {
+        if !pems.is_empty() {
             for mut pem in pems {
                 for cert in rustls_pemfile::certs(&mut pem.as_ref()) {
                     root_cert_store
                         .add(cert?)
-                        .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
                 }
             }
         } else {
@@ -52,7 +52,7 @@ impl ClientTlsConfig {
         let client_config = rustls::ClientConfig::builder()
             .with_root_certificates(root_cert_store)
             .with_no_client_auth();
-        let tls_connector = tokio_rustls::TlsConnector::from(Arc::new(client_config));
+        let tls_connector = tokio_rustls::TlsConnector::from(std::sync::Arc::new(client_config));
         Ok(Self {
             tls_connector: conn::TlsConnector::Rustls(tls_connector),
         })
@@ -276,13 +276,14 @@ impl ServerTlsConfig {
     pub fn from_pem(cert: Vec<u8>, key: Vec<u8>) -> Result<Self, Error> {
         let certs =
             rustls_pemfile::certs(&mut cert.as_ref()).collect::<std::io::Result<Vec<_>>>()?;
-        let key = rustls_pemfile::private_key(&mut key.as_ref())?
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "No private key found"))?;
+        let key = rustls_pemfile::private_key(&mut key.as_ref())?.ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "No private key found")
+        })?;
 
         let server_config = ServerConfig::builder()
             .with_no_client_auth()
             .with_single_cert(certs, key)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
 
         Ok(ServerTlsConfig {
             acceptor: conn::TlsAcceptor::Rustls(tokio_rustls::TlsAcceptor::from(
@@ -353,12 +354,8 @@ where
 
     pub fn add_matcher<M>(self, matcher: M) -> Self
     where
-        M: Service<
-                ProcessContext<C>,
-                Request<Vec<u8>>,
-                Response = Response<RawMsg>,
-                Error = crate::Error,
-            > + Clone
+        M: Service<ProcessContext<C>, Request<Vec<u8>>, Response = Response<RawMsg>, Error = Error>
+            + Clone
             + Send
             + Sync
             + 'static,
@@ -389,8 +386,11 @@ where
             )));
         }
 
-        self.node_name.push('@');
-        self.node_name.push_str(&get_short_hostname());
+        if !self.node_name.contains("@") {
+            self.node_name.push('@');
+            self.node_name.push_str(&get_short_hostname());
+        }
+
         let handshake_codec = HandshakeCodec::new(
             self.node_name.clone(),
             self.cookie.clone(),

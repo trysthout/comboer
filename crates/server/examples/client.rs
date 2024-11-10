@@ -48,15 +48,12 @@ impl Service<ProcessContext<BoxCx>, Request<CtrlMsg<SendSender, SmallAtomUtf8>>>
 
 #[tokio::main]
 async fn main() -> Result<(), server::Error> {
-    // let tls_config = server::ClientTlsConfig::from_pem_file(vec![
-    //     "/home/wjd/test-cert/rcgen/rustls-cert-gen/root-ca.pem",
-    //     "/home/wjd/test-cert/rcgen/rustls-cert-gen/cert.pem",
-    // ])?;
+    let tls_config = server::ClientTlsConfig::from_pem_file(vec!["root-ca.pem", "cert.pem"])?;
     let mut conn = NodeAsClient::new(
         "rust@fedora".to_string(),
         "aaa".to_string(),
         "127.0.0.1:4369",
-        None,
+        Some(tls_config),
     )
     .connect_local_by_name("a")
     .await?;

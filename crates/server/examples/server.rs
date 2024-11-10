@@ -37,7 +37,7 @@ impl Service<ProcessContext<EmptyBoxCx>, Request<CtrlMsg<SendSender, term::Small
 
         let msg: term::SmallTuple = vec![
             ctrl.from.clone().into(),
-            term::SmallAtomUtf8("from_rust0".to_string()).into(),
+            term::SmallAtomUtf8("from_rust".to_string()).into(),
             term::SmallAtomUtf8("rust node".to_string()).into(),
         ]
         .into();
@@ -97,7 +97,7 @@ impl Service<ProcessContext<EmptyBoxCx>, Request<CtrlMsg<SpawnRequest, term::Nil
 
 #[tokio::main]
 async fn main() {
-    let tls_config = ServerTlsConfig::from_pem_file("server.pem", "server-key.pem").unwrap();
+    let tls_config = ServerTlsConfig::from_pem_file("root-ca.pem", "root-ca.key.pem").unwrap();
     let s = server::ServiceBuilder::new(B).build();
     let node = NodeAsServer::new(
         "rust".to_string(),
