@@ -1,3 +1,6 @@
+### What is this?
+A Rust node implemented based on the Erlang distributed protocol.
+
 ### Preparation
 
 Running server or client depends on the epmd, so we need to start epmd first.
