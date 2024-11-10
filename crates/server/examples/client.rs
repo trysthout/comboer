@@ -48,7 +48,7 @@ impl Service<ProcessContext<BoxCx>, Request<CtrlMsg<SendSender, SmallAtomUtf8>>>
 
 #[tokio::main]
 async fn main() -> Result<(), server::Error> {
-    let tls_config = server::ClientTlsConfig::from_pem_file(vec!["root-ca.pem", "cert.pem"])?;
+    let tls_config = server::ClientTlsConfig::from_pem_file(vec!["root-ca.pem"])?;
     let mut conn = NodeAsClient::new(
         "rust@fedora".to_string(),
         "aaa".to_string(),

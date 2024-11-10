@@ -97,7 +97,7 @@ impl Service<ProcessContext<EmptyBoxCx>, Request<CtrlMsg<SpawnRequest, term::Nil
 
 #[tokio::main]
 async fn main() {
-    let tls_config = ServerTlsConfig::from_pem_file("root-ca.pem", "root-ca.key.pem").unwrap();
+    let tls_config = ServerTlsConfig::from_pem_file("cert.pem", "cert.key.pem").unwrap();
     let s = server::ServiceBuilder::new(B).build();
     let node = NodeAsServer::new(
         "rust".to_string(),
