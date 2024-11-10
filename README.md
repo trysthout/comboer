@@ -1,6 +1,9 @@
 ### What is this?
 A Rust node implemented based on the Erlang distributed protocol.
 
+## How to run the examples
+`cd crates/server/examples` to run the following example.
+
 ### Preparation
 
 Running server or client depends on the epmd, so we need to start epmd first.
