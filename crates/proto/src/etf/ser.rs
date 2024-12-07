@@ -256,7 +256,7 @@ pub struct SerializeSeq<'a> {
     elems: Vec<Term>,
 }
 
-impl<'a> ser::SerializeSeq for SerializeSeq<'a> {
+impl ser::SerializeSeq for SerializeSeq<'_> {
     // Must match the `Ok` type of the serializer.
     type Ok = Term;
     // Must match the `Error` type of the serializer.
@@ -283,7 +283,7 @@ impl<'a> ser::SerializeSeq for SerializeSeq<'a> {
     }
 }
 
-impl<'a> ser::SerializeTuple for SerializeSeq<'a> {
+impl ser::SerializeTuple for SerializeSeq<'_> {
     type Ok = Term;
     type Error = Error;
 
@@ -314,7 +314,7 @@ impl<'a> ser::SerializeTuple for SerializeSeq<'a> {
     }
 }
 
-impl<'a> ser::SerializeTupleStruct for SerializeSeq<'a> {
+impl ser::SerializeTupleStruct for SerializeSeq<'_> {
     type Ok = Term;
     type Error = Error;
 
@@ -345,7 +345,7 @@ impl<'a> ser::SerializeTupleStruct for SerializeSeq<'a> {
     }
 }
 
-impl<'a> ser::SerializeTupleVariant for SerializeSeq<'a> {
+impl ser::SerializeTupleVariant for SerializeSeq<'_> {
     type Ok = Term;
     type Error = Error;
 
@@ -379,7 +379,7 @@ impl<'a> ser::SerializeTupleVariant for SerializeSeq<'a> {
     }
 }
 
-impl<'a> ser::SerializeMap for SerializeSeq<'a> {
+impl ser::SerializeMap for SerializeSeq<'_> {
     type Ok = Term;
     type Error = Error;
 
@@ -409,7 +409,7 @@ impl<'a> ser::SerializeMap for SerializeSeq<'a> {
     }
 }
 
-impl<'a> ser::SerializeStruct for SerializeSeq<'a> {
+impl ser::SerializeStruct for SerializeSeq<'_> {
     type Ok = Term;
     type Error = Error;
 
@@ -431,7 +431,7 @@ impl<'a> ser::SerializeStruct for SerializeSeq<'a> {
     }
 }
 
-impl<'a> ser::SerializeStructVariant for SerializeSeq<'a> {
+impl ser::SerializeStructVariant for SerializeSeq<'_> {
     type Ok = Term;
     type Error = Error;
 

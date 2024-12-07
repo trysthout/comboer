@@ -87,7 +87,7 @@ impl<'de> Deserializer<'de> {
     }
 }
 
-impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
+impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
     type Error = Error;
 
     fn deserialize_any<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
@@ -478,7 +478,7 @@ impl<'a, 'de> DeserializerEnum<'a, 'de> {
     }
 }
 
-impl<'a, 'de> EnumAccess<'de> for DeserializerEnum<'a, 'de> {
+impl<'de> EnumAccess<'de> for DeserializerEnum<'_, 'de> {
     type Error = Error;
 
     type Variant = Self;
@@ -492,7 +492,7 @@ impl<'a, 'de> EnumAccess<'de> for DeserializerEnum<'a, 'de> {
     }
 }
 
-impl<'a, 'de> VariantAccess<'de> for DeserializerEnum<'a, 'de> {
+impl<'de> VariantAccess<'de> for DeserializerEnum<'_, 'de> {
     type Error = Error;
 
     fn unit_variant(self) -> Result<(), Self::Error> {
@@ -553,7 +553,7 @@ impl<'de> EnumAccess<'de> for DeserializerEnumUnit<'de> {
     }
 }
 
-impl<'a, 'de> VariantAccess<'de> for DeserializerEnumUnit<'a> {
+impl<'de> VariantAccess<'de> for DeserializerEnumUnit<'_> {
     type Error = Error;
 
     fn unit_variant(self) -> Result<(), Self::Error> {

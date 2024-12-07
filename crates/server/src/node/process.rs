@@ -1,15 +1,15 @@
+use std::marker::PhantomData;
+use std::sync::Arc;
 use std::{
     fmt::Debug,
     sync::atomic::{AtomicU32, AtomicU64, Ordering},
 };
-use std::marker::PhantomData;
-use std::sync::Arc;
 
 use dashmap::DashMap;
 use futures_util::StreamExt;
 use motore::{BoxCloneService, Service};
 
-use proto::{CtrlMsg, Decoder, Encoder, Len, term};
+use proto::{term, CtrlMsg, Decoder, Encoder, Len};
 
 use crate::{BoxStream, Error, RawMsg, Request, Response};
 

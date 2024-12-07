@@ -512,7 +512,7 @@ where
                         Ok(())
                     } else {
                         Err(Error::HandshakeFailed("invalid reply".to_string()))
-                    }
+                    };
                 }
                 x => return Err(Error::UnsupportedTag(x)),
             }
