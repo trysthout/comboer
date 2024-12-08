@@ -5,9 +5,10 @@ use tokio_stream::wrappers::ReceiverStream;
 use proto::{
     etf::term, term::PidOrAtom, CtrlMsg, ProcessKind, SendSender, SpawnReply, SpawnRequest,
 };
-use server::{
-    BoxStream, EmptyBoxCx, NodeAsServer, ProcessContext, Request, Response, ServerTlsConfig,
-};
+use server::{BoxStream, EmptyBoxCx, NodeAsServer, ProcessContext, Request, Response};
+
+#[cfg(feature = "tls")]
+use server::ServerTlsConfig;
 
 #[derive(Debug, Clone)]
 struct C(term::NewPid);
@@ -97,14 +98,37 @@ impl Service<ProcessContext<EmptyBoxCx>, Request<CtrlMsg<SpawnRequest, term::Nil
 
 #[tokio::main]
 async fn main() {
-    let tls_config = ServerTlsConfig::from_pem_file("cert.pem", "cert.key.pem").unwrap();
     let s = server::ServiceBuilder::new(B).build();
-    let node = NodeAsServer::new(
-        "rust".to_string(),
-        "aaa".to_string(),
-        "127.0.0.1:4369",
-        Some(tls_config),
-    )
-    .add_matcher(s);
+    #[cfg(feature = "tls")]
+    let node = {
+        let tls_config = ServerTlsConfig::from_pem_file("cert.pem", "cert.key.pem").unwrap();
+        NodeAsServer::new(
+            "rust".to_string(),
+            "aaa".to_string(),
+            "127.0.0.1:4369",
+            Some(tls_config),
+        )
+        .add_matcher(s)
+    };
+
+    #[cfg(not(feature = "tls"))]
+    let node = {
+        NodeAsServer::new(
+            "rust".to_string(),
+            "aaa".to_string(),
+            "127.0.0.1:4369",
+            None,
+        )
+        .add_matcher(s)
+    };
+    // } else {
+    // node = NodeAsServer::new(
+    //     "rust".to_string(),
+    //     "aaa".to_string(),
+    //     "127.0.0.1:4369",
+    //     None,
+    // )
+    // .add_matcher(s);
+
     node.listen().await.unwrap();
 }

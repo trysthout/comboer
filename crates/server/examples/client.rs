@@ -48,16 +48,28 @@ impl Service<ProcessContext<BoxCx>, Request<CtrlMsg<SendSender, SmallAtomUtf8>>>
 
 #[tokio::main]
 async fn main() -> Result<(), server::Error> {
-    let tls_config = server::ClientTlsConfig::from_pem_file(vec!["root-ca.pem"])?;
-    let mut conn = NodeAsClient::new(
-        "rust@fedora".to_string(),
-        "aaa".to_string(),
-        "127.0.0.1:4369",
-        Some(tls_config),
-    )
-    .connect_local_by_name("a")
-    .await?;
+    #[cfg(feature = "tls")]
+    let node = {
+        let tls_config = server::ClientTlsConfig::from_pem_file(vec!["root-ca.pem"])?;
+        NodeAsClient::new(
+            "rust@fedora".to_string(),
+            "aaa".to_string(),
+            "127.0.0.1:4369",
+            Some(tls_config),
+        )
+    };
 
+    #[cfg(not(feature = "tls"))]
+    let node = {
+        NodeAsClient::new(
+            "rust@fedora".to_string(),
+            "aaa".to_string(),
+            "127.0.0.1:4369",
+            None,
+        )
+    };
+
+    let mut conn = node.connect_local_by_name("a").await?;
     let sender = conn.get_sender();
     conn.get_cx()
         .add_matcher(ServiceBuilder::new(Arc::new(A { sender })).build());
@@ -79,13 +91,13 @@ async fn main() -> Result<(), server::Error> {
         ],
     };
 
-    let _ = conn.send_req_data(CtrlMsg::new(&ctrl, Some(msg))).await?;
+    conn.send_req_data(CtrlMsg::new(&ctrl, Some(msg))).await?;
     conn.get_cx().set_box_cx(BoxCx {
         from: process,
         ctrl: ctrl.clone(),
     });
 
-    let _ = conn.serving().await?;
+    conn.serving().await?;
 
     Ok(())
 }

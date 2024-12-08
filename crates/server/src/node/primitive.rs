@@ -38,7 +38,7 @@ impl ClientTlsConfig {
     pub fn from_pem(pems: Vec<Vec<u8>>) -> Result<Self, Error> {
         let mut root_cert_store = rustls::RootCertStore::empty();
         if !pems.is_empty() {
-            for mut pem in pems {
+            for pem in pems {
                 for cert in rustls_pemfile::certs(&mut pem.as_ref()) {
                     root_cert_store
                         .add(cert?)
@@ -169,21 +169,30 @@ where
         let stream = TcpStream::connect(addr).await?;
         let _ = stream.set_nodelay(true);
 
-        #[allow(unused_mut)]
-        let mut conn_stream = ConnStream::Tcp(stream);
         #[cfg(feature = "tls")]
-        let mut conn_stream = if let Some(client_tls_config) = &self.client_tls_config {
-            if let ConnStream::Tcp(stream) = conn_stream {
-                client_tls_config
-                    .tls_connector
-                    .connect(remote_node_name, stream)
-                    .await?
-            } else {
-                unreachable!()
-            }
-        } else {
-            unreachable!()
+        let mut conn_stream = {
+            self.client_tls_config
+                .as_ref()
+                .unwrap()
+                .tls_connector
+                .connect(remote_node_name, stream)
+                .await?
         };
+
+        #[cfg(not(feature = "tls"))]
+        let mut conn_stream = ConnStream::Tcp(stream);
+        // let mut conn_stream = if let Some(client_tls_config) = &self.client_tls_config {
+        //     if let ConnStream::Tcp(stream) = conn_stream {
+        //         client_tls_config
+        //             .tls_connector
+        //             .connect(remote_node_name, stream)
+        //             .await?
+        //     } else {
+        //         unreachable!()
+        //     }
+        // } else {
+        //     unreachable!()
+        // };
 
         self.client_handshake(handshake_codec, &mut conn_stream)
             .await?;

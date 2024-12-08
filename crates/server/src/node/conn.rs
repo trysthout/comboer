@@ -275,3 +275,26 @@ where
         Ok(length)
     }
 }
+
+impl From<TcpStream> for ConnStream {
+    #[inline]
+    fn from(s: TcpStream) -> Self {
+        Self::Tcp(s)
+    }
+}
+
+#[cfg(feature = "rustls")]
+impl From<tokio_rustls::TlsStream<TcpStream>> for ConnStream {
+    #[inline]
+    fn from(s: tokio_rustls::TlsStream<TcpStream>) -> Self {
+        Self::Rustls(s)
+    }
+}
+
+#[cfg(feature = "native-tls")]
+impl From<tokio_native_tls::TlsStream<TcpStream>> for ConnStream {
+    #[inline]
+    fn from(s: tokio_native_tls::TlsStream<TcpStream>) -> Self {
+        Self::Nativetls(s)
+    }
+}
