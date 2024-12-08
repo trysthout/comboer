@@ -181,18 +181,6 @@ where
 
         #[cfg(not(feature = "tls"))]
         let mut conn_stream = ConnStream::Tcp(stream);
-        // let mut conn_stream = if let Some(client_tls_config) = &self.client_tls_config {
-        //     if let ConnStream::Tcp(stream) = conn_stream {
-        //         client_tls_config
-        //             .tls_connector
-        //             .connect(remote_node_name, stream)
-        //             .await?
-        //     } else {
-        //         unreachable!()
-        //     }
-        // } else {
-        //     unreachable!()
-        // };
 
         self.client_handshake(handshake_codec, &mut conn_stream)
             .await?;
